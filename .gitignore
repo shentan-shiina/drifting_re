@@ -1,0 +1,72 @@
+# ==========================================
+# 1. Machine Learning Weights & Checkpoints
+# ==========================================
+# Ignore PyTorch model weights
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Ignore Hugging Face cache or openpi downloaded weights
+weights/
+checkpoints/
+
+# ==========================================
+# 2. Datasets & Robotics Logs
+# ==========================================
+# Ignore heavy benchmark datasets (Libero, Calvin, ManiSkill3)
+data/
+datasets/
+paper/
+
+# Ignore heavy data formats
+*.h5
+*.hdf5
+*.tfrecord
+*.npz
+*.pkl
+
+# Ignore ROS/ROS2 bag files and logs (if you use ROS for ManiSkill/hardware)
+*.bag
+log/
+.ros/
+
+# ==========================================
+# 3. Experiment Logs & Visualizations
+# ==========================================
+# Ignore TensorBoard and Weights & Biases logs
+runs/
+tb_logs/
+wandb/
+
+# Ignore visualization outputs (videos and plots)
+*.mp4
+*.gif
+*.png
+*.jpg
+outputs/
+visualizations/
+
+# ==========================================
+# 4. Python & Environments
+# ==========================================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# ==========================================
+# 5. OS & Editor Settings
+# ==========================================
+.DS_Store
+.vscode/
+.idea/
+*.egg-info

@@ -15,7 +15,7 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from drifting.models.model import DriftDiT_models
+from drifting.models.dit_drift import DriftDiT_models
 from drifting.models.feature_encoder import create_feature_encoder
 from drifting.utils.train_utils import train_step, fill_queue
 from drifting.utils.data_utils import get_dataset

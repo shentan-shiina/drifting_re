@@ -11,7 +11,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from typing import Optional, Dict, Any
-from drifting.models.model import DriftDiT_models
+from drifting.models.dit_drift import DriftDiT_models
 
 
 class EMA:

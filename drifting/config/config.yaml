@@ -7,9 +7,9 @@ batch_size: 512
 num_workers: 4
 output_dir: outputs
 resume: null
-log_interval: 100
+log_interval: 1
 save_interval: 10
-sample_interval: 10
+sample_interval: 1
 data_root: data
 
 hydra:

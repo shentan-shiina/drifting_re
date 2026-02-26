@@ -17,7 +17,7 @@ from tqdm import tqdm
 
 from drifting.models.model import DriftDiT_models
 from drifting.models.feature_encoder import create_feature_encoder
-from drifting.training.train_utils import train_step, fill_queue
+from drifting.utils.train_utils import train_step, fill_queue
 from drifting.utils.data_utils import get_dataset
 from drifting.utils.utils import (
     EMA,
@@ -29,38 +29,13 @@ from drifting.utils.utils import (
     count_parameters,
     set_seed,
 )
+from sample import generate_samples
 
-
-@torch.no_grad()
-def generate_samples(
-    model: torch.nn.Module,
-    config: dict,
-    device: torch.device,
-    save_path: str,
-    num_per_class: int = 8,
-    alpha: float = 1.5,
-):
-    """Generate samples for quick visualization."""
-    model.eval()
-
-    num_classes = config["num_classes"]
-    in_channels = config["in_channels"]
-    img_size = config["img_size"]
-
-    samples = []
-    for c in range(num_classes):
-        noise = torch.randn(num_per_class, in_channels, img_size, img_size, device=device)
-        labels = torch.full((num_per_class,), c, device=device, dtype=torch.long)
-
-        x = model.forward_with_cfg(noise, labels, alpha=alpha)
-        samples.append(x)
-
-    samples = torch.cat(samples, dim=0).clamp(-1, 1)
-    save_image_grid(samples, save_path, nrow=num_per_class)
-
-
+#######################################################
+#                       Main                          #
+#######################################################
 def train(cfg: DictConfig):
-    """Main training loop."""
+    ########### Initialize ###########
     set_seed(cfg.seed)
 
     dataset_cfg = OmegaConf.to_container(cfg.dataset, resolve=True)
@@ -81,6 +56,7 @@ def train(cfg: DictConfig):
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Working directory (Hydra run dir): {output_dir}")
 
+    ########### Createt DataLoader ###########
     train_dataset, _ = get_dataset(dataset_name, root=str(data_root))
     train_loader = DataLoader(
         train_dataset,
@@ -90,7 +66,8 @@ def train(cfg: DictConfig):
         pin_memory=True,
         drop_last=True,
     )
-
+    
+    ########### Create Model ###########
     model_fn = DriftDiT_models[config["model"]]
     model = model_fn(
         img_size=config["img_size"],
@@ -100,6 +77,7 @@ def train(cfg: DictConfig):
     ).to(device)
     print(f"Model: {config['model']}, Parameters: {count_parameters(model):,}")
 
+    ########### Create Train State ###########
     ema = EMA(model, decay=config["ema_decay"])
 
     optimizer = torch.optim.AdamW(
@@ -120,6 +98,7 @@ def train(cfg: DictConfig):
         sample_shape=(config["in_channels"], config["img_size"], config["img_size"]),
     )
 
+    ########### Create Feature Encoder ###########
     feature_encoder = None
     if config["use_feature_encoder"]:
         print("Creating feature encoder...")
@@ -133,6 +112,7 @@ def train(cfg: DictConfig):
         for param in feature_encoder.parameters():
             param.requires_grad = False
 
+    ########### Training Loop ###########
     start_epoch = 0
     global_step = 0
     if cfg.resume:
@@ -157,8 +137,9 @@ def train(cfg: DictConfig):
             desc=f"Epoch {epoch+1}/{config['epochs']}",
             leave=False,
         )
-
-        for batch_idx, batch in enumerate(progress):
+        
+        ########### Batch Queue ###########
+        for _, batch in enumerate(progress):
             if isinstance(batch, (list, tuple)):
                 x_real, labels_real = batch[0].to(device), batch[1].to(device)
             else:
@@ -170,6 +151,7 @@ def train(cfg: DictConfig):
             if not queue.is_ready(config["batch_n_pos"]):
                 continue
 
+            ########### Training Step ###########
             info = train_step(
                 model,
                 optimizer,
@@ -182,6 +164,7 @@ def train(cfg: DictConfig):
             ema.update(model)
             scheduler.step()
 
+            ########### Metrics ###########
             epoch_loss += info["loss"]
             epoch_drift_norm += info["drift_norm"]
             num_batches += 1
@@ -192,29 +175,34 @@ def train(cfg: DictConfig):
                     loss=f"{info['loss']:.4f}", drift=f"{info['drift_norm']:.4f}", grad=f"{info['grad_norm']:.2f}"
                 )
 
-            if global_step % cfg.log_interval == 0:
-                lr = scheduler.get_lr()
-                print(
-                    f"Epoch {epoch+1}/{config['epochs']} | "
-                    f"Step {global_step} | "
-                    f"Loss: {info['loss']:.4f} | "
-                    f"Drift: {info['drift_norm']:.4f} | "
-                    f"Grad: {info['grad_norm']:.4f} | "
-                    f"LR: {lr:.6f}"
-                )
-
-            if global_step % 500 == 0:
-                sample_path = output_dir / f"samples_step{global_step}.png"
-                generate_samples(
-                    ema.shadow,
-                    config,
-                    device,
-                    str(sample_path),
-                    num_per_class=8,
-                )
-                print(f"Saved samples to {sample_path}")
-
+        ########### Print Per Epoch ###########
         epoch_time = time.time() - epoch_start
+        if (epoch + 1) % cfg.log_interval == 0:
+            lr = scheduler.get_lr()
+            print(
+                f"Epoch {epoch+1}/{config['epochs']} | "
+                f"Step {global_step} | "
+                f"Loss: {info['loss']:.4f} | "
+                f"Drift: {info['drift_norm']:.4f} | "
+                f"Grad: {info['grad_norm']:.4f} | "
+                f"LR: {lr:.6f}"
+            )
+
+        if (epoch + 1) % cfg.sample_interval == 0:
+            sample_path = output_dir / f"samples_epoch{(epoch + 1)}.png"
+            samples = generate_samples(
+                ema.shadow,
+                config["num_classes"] * config["batch_n_pos"],
+                config["in_channels"],
+                config["img_size"],
+                config["num_classes"],
+                device,
+                labels = None,
+                use_cfg = False
+            )
+            save_image_grid(samples, sample_path, nrow=config["batch_n_pos"])
+            print(f"Saved samples to {sample_path}")
+
         avg_loss = epoch_loss / max(num_batches, 1)
         avg_drift = epoch_drift_norm / max(num_batches, 1)
         print(
@@ -223,6 +211,7 @@ def train(cfg: DictConfig):
             f"Avg Drift Norm: {avg_drift:.4f}\n"
         )
 
+        ########### Save Checkpoint ###########
         if (epoch + 1) % cfg.save_interval == 0:
             ckpt_path = output_dir / f"checkpoint_epoch{epoch+1}.pt"
             save_checkpoint(
@@ -236,17 +225,6 @@ def train(cfg: DictConfig):
                 config,
             )
             print(f"Saved checkpoint to {ckpt_path}")
-
-        if (epoch + 1) % cfg.sample_interval == 0:
-            sample_path = output_dir / f"samples_epoch{epoch+1}.png"
-            generate_samples(
-                ema.shadow,
-                config,
-                device,
-                str(sample_path),
-                num_per_class=8,
-            )
-            print(f"Saved samples to {sample_path}")
 
     final_path = output_dir / "checkpoint_final.pt"
     save_checkpoint(

@@ -16,11 +16,12 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from drifting.models.model import DriftDiT_models
 from drifting.utils.data_utils import get_dataset
-from drifting.utils.utils import save_image_grid, set_seed
+from drifting.utils.utils import save_image_grid, set_seed, load_model_from_checkpoint
 
-
+#######################################################
+#                 Generate Samples                    #
+#######################################################
 @torch.no_grad()
 def generate_samples(
     model: nn.Module,
@@ -51,7 +52,9 @@ def generate_samples(
 
     return x.clamp(-1, 1)
 
-
+#######################################################
+#               Generate Class Grid                   #
+#######################################################
 @torch.no_grad()
 def generate_class_grid(
     model: nn.Module,
@@ -71,7 +74,9 @@ def generate_class_grid(
         rows.append(x)
     return torch.cat(rows, dim=0).clamp(-1, 1)
 
-
+#######################################################
+#           Generate Alpha Sweep Samples              #
+#######################################################
 @torch.no_grad()
 def generate_alpha_sweep(
     model: nn.Module,
@@ -92,7 +97,9 @@ def generate_alpha_sweep(
         sweep.append(x)
     return torch.cat(sweep, dim=0).clamp(-1, 1)
 
-
+#######################################################
+#                   Compute FID                       #
+#######################################################
 def compute_fid_score(
     model: nn.Module,
     real_loader: DataLoader,
@@ -157,38 +164,11 @@ def compute_fid_score(
 
     return fid_metric.compute().item()
 
-
-def load_model_from_checkpoint(
-    checkpoint_path: Path,
-    config: Dict[str, Any],
-    device: torch.device,
-) -> nn.Module:
-    """Load model weights from checkpoint, preferring EMA weights."""
-    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    ckpt_cfg = checkpoint.get("config", {})
-
-    model_name = ckpt_cfg.get("model", config["model"])
-    img_size = ckpt_cfg.get("img_size", config["img_size"])
-    in_channels = ckpt_cfg.get("in_channels", config["in_channels"])
-    num_classes = ckpt_cfg.get("num_classes", config["num_classes"])
-    label_dropout = ckpt_cfg.get("label_dropout", config.get("label_dropout", 0.0))
-
-    model_fn = DriftDiT_models[model_name]
-    model = model_fn(
-        img_size=img_size,
-        in_channels=in_channels,
-        num_classes=num_classes,
-        label_dropout=label_dropout,
-    ).to(device)
-
-    state = checkpoint.get("ema", checkpoint.get("model"))
-    model.load_state_dict(state)
-    model.eval()
-    return model
-
-
+#######################################################
+#                       Main                          #
+#######################################################
 def sample_and_save(cfg: DictConfig):
-    """Load model, generate visualizations, optionally compute FID."""
+    ########### Initialize ###########
     set_seed(cfg.samples.seed)
 
     dataset_cfg = OmegaConf.to_container(cfg.dataset, resolve=True)
@@ -197,6 +177,7 @@ def sample_and_save(cfg: DictConfig):
     config: Dict[str, Any] = dataset_cfg
     dataset_name = config["name"]
 
+    ########### Load Model ###########
     if cfg.checkpoint is None:
         raise ValueError("cfg.checkpoint must be provided (path to checkpoint)")
 
@@ -213,6 +194,7 @@ def sample_and_save(cfg: DictConfig):
     ckpt_path = Path(to_absolute_path(cfg.checkpoint))
     model = load_model_from_checkpoint(ckpt_path, config, device)
 
+    ########### Generate Samples ###########
     print(f"Generating class grid ({config['num_classes']} classes x {cfg.samples.samples_per_class} samples)...")
     grid = generate_class_grid(
         model,
@@ -258,6 +240,7 @@ def sample_and_save(cfg: DictConfig):
         save_image_grid(sweep_samples, str(sweep_path), nrow=8)
         print(f"Saved alpha sweep for class {label} to {sweep_path}")
 
+    ########### Compute FID Score ###########
     if cfg.samples.compute_fid:
         print("Computing FID score...")
         _, test_dataset = get_dataset(dataset_name, root=str(data_root))

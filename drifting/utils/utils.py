@@ -11,6 +11,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from typing import Optional, Dict, Any
+from drifting.models.model import DriftDiT_models
 
 
 class EMA:
@@ -140,6 +141,35 @@ def load_checkpoint(
     if scheduler is not None and "scheduler" in checkpoint:
         scheduler.load_state_dict(checkpoint["scheduler"])
     return checkpoint
+
+
+def load_model_from_checkpoint(
+    checkpoint_path: Path,
+    config: Dict[str, Any],
+    device: torch.device,
+) -> nn.Module:
+    """Load model weights from checkpoint, preferring EMA weights."""
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    ckpt_cfg = checkpoint.get("config", {})
+
+    model_name = ckpt_cfg.get("model", config["model"])
+    img_size = ckpt_cfg.get("img_size", config["img_size"])
+    in_channels = ckpt_cfg.get("in_channels", config["in_channels"])
+    num_classes = ckpt_cfg.get("num_classes", config["num_classes"])
+    label_dropout = ckpt_cfg.get("label_dropout", config.get("label_dropout", 0.0))
+
+    model_fn = DriftDiT_models[model_name]
+    model = model_fn(
+        img_size=img_size,
+        in_channels=in_channels,
+        num_classes=num_classes,
+        label_dropout=label_dropout,
+    ).to(device)
+
+    state = checkpoint.get("ema", checkpoint.get("model"))
+    model.load_state_dict(state)
+    model.eval()
+    return model
 
 
 def make_image_grid(

@@ -1,0 +1,25 @@
+defaults:
+  - dataset: mnist
+  - _self_
+
+checkpoint: null
+output_dir: outputs/samples
+
+samples:
+  num_samples: 100
+  samples_per_class: 10
+  alpha: 1.5
+  seed: 42
+  compute_fid: true
+  fid_num_samples: 10000
+  fid_batch_size: 256
+
+num_workers: 4
+data_root: data
+
+hydra:
+  run:
+    dir: ${output_dir}/${dataset.name}/${now:%Y%m%d_%H%M%S}
+  output_subdir: null
+  job:
+    chdir: true

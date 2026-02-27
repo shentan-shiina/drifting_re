@@ -361,13 +361,54 @@ def DriftDiT_Small(img_size=32, in_channels=3, num_classes=10, **kwargs):
         patch_size=4,
         in_channels=in_channels,
         hidden_size=384,
-        depth=8,
+        depth=12,
         num_heads=6,
-        mlp_ratio=4.0,
+        mlp_ratio=6.0,
         num_classes=num_classes,
         **kwargs,
     )
 
+def DriftDiT_Big(img_size=32, in_channels=3, num_classes=10, **kwargs):
+    """DriftDiT-Small: depth=8, hidden_dim=384, heads=6 -> ~15M params"""
+    return DriftDiT(
+        img_size=img_size,
+        patch_size=4,
+        in_channels=in_channels,
+        hidden_size=768,
+        depth=12,
+        num_heads=12,
+        mlp_ratio=6.0,
+        num_classes=num_classes,
+        **kwargs,
+    )
+
+def DriftDiT_Large(img_size=32, in_channels=3, num_classes=10, **kwargs):
+    """DriftDiT-Small: depth=8, hidden_dim=384, heads=6 -> ~15M params"""
+    return DriftDiT(
+        img_size=img_size,
+        patch_size=4,
+        in_channels=in_channels,
+        hidden_size=1024,
+        depth=24,
+        num_heads=16,
+        mlp_ratio=6.0,
+        num_classes=num_classes,
+        **kwargs,
+    )
+
+def DriftDiT_XLarge(img_size=32, in_channels=3, num_classes=10, **kwargs):
+    """DriftDiT-Small: depth=8, hidden_dim=384, heads=6 -> ~15M params"""
+    return DriftDiT(
+        img_size=img_size,
+        patch_size=4,
+        in_channels=in_channels,
+        hidden_size=1152,
+        depth=24,
+        num_heads=16,
+        mlp_ratio=6.0,
+        num_classes=num_classes,
+        **kwargs,
+    )
 
 # Model registry
 DriftDiT_models = {

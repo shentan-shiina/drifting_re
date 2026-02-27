@@ -9,7 +9,14 @@ from drifting.models.dit_lightning import DriftDiTModule
 from drifting.utils.trainer_callbacks import EMACallback, SamplingCallback
 from drifting.utils.data_utils import get_dataset
 from lightning.pytorch.loggers import WandbLogger
+
+from drifting.utils.vae_utils import LatentDataset
+
 # from litlogger import LightningLogger # Save for the future
+    # logger = LightningLogger(
+    #     name="drift-lightning",
+    #     metadata={"model": "DriftDiT"},
+    # ) # Save for the future
 
 set_float32_matmul_precision('high')
 
@@ -19,26 +26,26 @@ def main(cfg: DictConfig):
     config = OmegaConf.to_container(cfg.dataset, resolve=True)
 
     wandb_logger = WandbLogger(name="drift-lightning"+f"{config["model"]}-{cfg.run_name}")
-
-    # logger = LightningLogger(
-    #     name="drift-lightning",
-    #     metadata={"model": "DriftDiT"},
-    # ) # Save for the future
     
     last_checkpoint_path = os.path.join(cfg.resume_dir, 'last.ckpt')
     last_checkpoint = last_checkpoint_path if os.path.exists(last_checkpoint_path) and cfg.resume_from_ckpt else None
 
-    # 1. Data Setup (Standard PyTorch DataLoader works perfectly in Lightning)
-    train_dataset, _ = get_dataset(config["name"], root=cfg.data_root)
+    # Data Setup
+    if cfg.use_latent:
+        latent_dir = os.path.join(cfg.data_root, config["name"], "latents")
+        train_dataset = LatentDataset(root=latent_dir, use_flip=config.get("latent_flip", True))
+    else:
+        train_dataset, _ = get_dataset(config["name"], root=cfg.data_root)
+
     train_loader = DataLoader(
         train_dataset, batch_size=cfg.batch_size, shuffle=True, 
         num_workers=cfg.num_workers, drop_last=True
     )
 
-    # 2. Model Setup
+    # Model Setup
     model = DriftDiTModule(config)
 
-    # 3. Callbacks Setup
+    # Callbacks Setup
     callbacks = [
         ModelCheckpoint(
             dirpath="checkpoints",
@@ -52,17 +59,17 @@ def main(cfg: DictConfig):
         SamplingCallback(sample_interval=cfg.sample_interval, config=config)
     ]
 
-    # 4. Trainer Setup
+    # Trainer Setup
     trainer = Trainer(
         logger=wandb_logger,
         max_epochs=config["epochs"],
         callbacks=callbacks,
-        accelerator="auto", # Automatically uses CUDA if available
-        # precision="16-mixed", # <--- FREE 2x SPEEDUP & VRAM REDUCTION
+        accelerator="auto",
+        # precision="16-mixed",
         log_every_n_steps=cfg.log_step_interval,
     )
 
-    # 5. GO!
+    # Start Training
     trainer.fit(model,
                 train_dataloaders=train_loader,
                 ckpt_path=last_checkpoint)

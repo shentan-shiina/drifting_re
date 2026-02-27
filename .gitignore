@@ -18,6 +18,7 @@ checkpoints/
 data/
 datasets/
 paper/
+huggingface/
 
 # Ignore heavy data formats
 *.h5

@@ -20,7 +20,7 @@ def _cifar10_exists(root: Path) -> bool:
     return (cifar_root / "data_batch_1").exists() and (cifar_root / "test_batch").exists()
 
 
-def get_dataset(name: str, root: str = "data") -> Tuple[object, object]:
+def get_dataset(name: str, root: str = "data", resize: int = 32) -> Tuple[object, object]:
     """Get dataset and transforms while reusing already-downloaded data."""
     root_path = Path(root).expanduser().resolve()
     root_path.mkdir(parents=True, exist_ok=True)
@@ -33,7 +33,7 @@ def get_dataset(name: str, root: str = "data") -> Tuple[object, object]:
 
         transform = transforms.Compose(
             [
-                transforms.Resize(32),
+                # transforms.Resize(resize),
                 transforms.ToTensor(),
                 transforms.Normalize([0.5], [0.5]),
             ]
@@ -51,6 +51,7 @@ def get_dataset(name: str, root: str = "data") -> Tuple[object, object]:
 
         transform = transforms.Compose(
             [
+                # transforms.Resize(resize),
                 transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),

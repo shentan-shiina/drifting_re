@@ -12,7 +12,29 @@ import matplotlib.pyplot as plt
 import numpy as np
 from typing import Optional, Dict, Any
 from drifting.models.dit_drift import DriftDiT_models
+import scipy.linalg
 
+def calculate_frechet_distance(mu1: np.ndarray, sigma1: np.ndarray, mu2: np.ndarray, sigma2: np.ndarray, eps: float = 1e-6) -> float:
+    """Numpy implementation of the Frechet Distance."""
+    mu1 = np.atleast_1d(mu1)
+    mu2 = np.atleast_1d(mu2)
+    sigma1 = np.atleast_2d(sigma1)
+    sigma2 = np.atleast_2d(sigma2)
+
+    diff = mu1 - mu2
+    # Product might be almost singular
+    covmean, _ = scipy.linalg.sqrtm(sigma1.dot(sigma2), disp=False)
+    
+    if not np.isfinite(covmean).all():
+        offset = np.eye(sigma1.shape[0]) * eps
+        covmean = scipy.linalg.sqrtm((sigma1 + offset).dot(sigma2 + offset))
+        
+    # Numerical error might give slight imaginary component
+    if np.iscomplexobj(covmean):
+        covmean = covmean.real
+        
+    fid = diff.dot(diff) + np.trace(sigma1 + sigma2 - 2.0 * covmean)
+    return float(fid)
 
 class EMA:
     """Exponential Moving Average for model parameters."""

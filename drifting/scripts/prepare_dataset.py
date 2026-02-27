@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""
+Script for pre-computing VAE latent datasets and FID statistics.
+"""
+
+import os
+import torch
+import numpy as np
+from pathlib import Path
+from tqdm import tqdm
+from omegaconf import DictConfig, OmegaConf
+import hydra
+from diffusers.models import AutoencoderKL
+from torch.utils.data import DataLoader
+
+from drifting.utils.data_utils import get_dataset
+
+#######################################################
+#              Compute Latent Dataset                 #
+#  (Precompute latents for *any* dataset -> size/8)   #
+#######################################################
+
+@torch.no_grad()
+def compute_latent_dataset(cfg: DictConfig, output_dir: Path, device: torch.device):
+    """Encodes images to latents using VAE and saves them to disk."""
+    latent_dir = output_dir / "latents"
+    latent_dir.mkdir(parents=True, exist_ok=True)
+    
+    ########### Load VAE ###########
+    print(f"Loading VAE model: {cfg.vae_id}")
+    vae = AutoencoderKL.from_pretrained(cfg.vae_id).to(device)
+    vae.eval()
+    
+    ########### Load Dataset ###########
+    dataset_cfg = OmegaConf.to_container(cfg.dataset, resolve=True)
+    dataset, _ = get_dataset(dataset_cfg["name"], root=cfg.data_root)
+    
+    loader = DataLoader(
+        dataset, 
+        batch_size=cfg.batch_size, 
+        shuffle=False, 
+        num_workers=cfg.num_workers,
+        pin_memory=True
+    )
+    
+    ########### Compute Latents ###########
+    print(f"Encoding {len(dataset)} images to latents...")
+    idx = 0
+    for batch in tqdm(loader, desc="Encoding Latents"):
+        images, labels = batch[0].to(device), batch[1].to(device)
+
+        # Encode to latent distribution
+        latent_dist = vae.encode(images).latent_dist
+        
+        # Extract mean and std
+        mean = latent_dist.mean
+        std = latent_dist.std
+        
+        # Concat along channel dim to shape (B, 8, H/8, W/8)
+        cached_latents = torch.cat([mean, std], dim=1).cpu()
+        labels = labels.cpu()
+
+        for i in range(images.size(0)):
+            save_path = latent_dir / f"{idx:07d}.pt"
+            torch.save({
+                "image": cached_latents[i], 
+                "label": labels[i]
+            }, save_path)
+            idx += 1
+            
+    print(f"Successfully saved {idx} latents to {latent_dir}")
+
+
+#######################################################
+#                 Compute FID Stats                   #
+#              (Precompute FID Scores)                #
+#######################################################
+@torch.no_grad()
+def compute_fid_stats(cfg: DictConfig, output_dir: Path, device: torch.device):
+    """Computes FID statistics (mu, sigma) of the real dataset."""
+    from torchvision.models.inception import inception_v3, Inception_V3_Weights
+    import torch.nn.functional as F
+
+    stats_dir = output_dir / "fid_stats"
+    stats_dir.mkdir(parents=True, exist_ok=True)
+    
+    ########### Load Dataset ###########
+    dataset_cfg = OmegaConf.to_container(cfg.dataset, resolve=True)
+    dataset, _ = get_dataset(dataset_cfg["name"], root=cfg.data_root)
+    
+    loader = DataLoader(
+        dataset, 
+        batch_size=cfg.batch_size, 
+        shuffle=False, 
+        num_workers=cfg.num_workers
+    )
+
+    ########### Load InceptionV3 ###########
+    print("Loading InceptionV3 for FID stats...")
+    inception = inception_v3(weights=Inception_V3_Weights.IMAGENET1K_V1).to(device)
+    inception.fc = torch.nn.Identity() # Remove classification head to get pool3 features
+    inception.eval()
+
+    all_features = []
+
+    ########### Extract FID Features ###########
+    for batch in tqdm(loader, desc="Computing FID Features"):
+        images = batch[0].to(device)
+        
+        # Inception expects images in [0, 1] range and min size 299x299
+        images = (images + 1) / 2 
+        if images.shape[1] == 1:
+            images = images.repeat(1, 3, 1, 1)
+        images = F.interpolate(images, size=(299, 299), mode="bilinear", align_corners=False)
+        
+        features = inception(images)
+        all_features.append(features.cpu())
+
+    all_features = torch.cat(all_features, dim=0).numpy()
+    
+    ########### Compute Mean and Covariance ###########
+    #$$d^2 = ||\mu_1 - \mu_2||^2 + \text{Tr}(\Sigma_1 + \Sigma_2 - 2(\Sigma_1 \Sigma_2)^{1/2})$$#
+    print("Calculating mean and covariance...")
+    mu = np.mean(all_features, axis=0)
+    sigma = np.cov(all_features, rowvar=False)
+    
+    ########### Save ###########
+    np.savez(stats_dir / f"{dataset_cfg['name']}_fid_stats.npz", mu=mu, sigma=sigma)
+    print(f"FID stats saved to {stats_dir}/{dataset_cfg['name']}_fid_stats.npz")
+
+@hydra.main(config_path="../config", config_name="precompute", version_base="1.3")
+def main(cfg: DictConfig):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    output_dir = Path(cfg.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    if cfg.compute_latent:
+        compute_latent_dataset(cfg, output_dir, device)
+        
+    if cfg.compute_fid:
+        compute_fid_stats(cfg, output_dir, device)
+
+if __name__ == "__main__":
+    main()

@@ -2,8 +2,10 @@ defaults:
   - dataset: mnist
   - _self_
 
-checkpoint: /home/ubt/1git/drifting_re/outputs/mnist/run_1/checkpoints/DriftDiT-Tiny-run_1-epoch=1109.ckpt
-output_dir: outputs/samples
+checkpoint: /home/ubt/1git/drifting_re/outputs/mnist/run_1/checkpoints/last.ckpt
+output_dir: /home/ubt/1git/drifting_re/outputs/samples
+data_root: /home/ubt/1git/drifting_re/data
+
 
 samples:
   num_samples: 100
@@ -11,11 +13,12 @@ samples:
   alpha: 1.5
   seed: 42
   compute_fid: true
-  fid_num_samples: 10000
+  fid_num_samples: 1000
   fid_batch_size: 256
+  fid_stats_path: ${data_root}/${dataset.name}/fid_stats/${dataset.name}_fid_stats.npz
 
 num_workers: 4
-data_root: data
+
 
 hydra:
   run:

@@ -12,7 +12,7 @@ weight_decay: 0.01
 grad_clip: 2.0
 ema_decay: 0.999
 warmup_steps: 1000
-epochs: 100
+epochs: 1000
 alpha_min: 1.0
 alpha_max: 3.0
 use_feature_encoder: false

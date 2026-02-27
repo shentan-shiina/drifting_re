@@ -4,8 +4,8 @@ img_size: 32
 in_channels: 3
 num_classes: 10
 batch_nc: 10
-batch_n_pos: 32
-batch_n_neg: 32
+batch_n_pos: 16
+batch_n_neg: 16
 temperatures: [0.02, 0.05, 0.2]
 lr: 0.0002
 weight_decay: 0.01

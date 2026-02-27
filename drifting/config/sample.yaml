@@ -2,7 +2,7 @@ defaults:
   - dataset: mnist
   - _self_
 
-checkpoint: null
+checkpoint: /home/ubt/1git/drifting_re/outputs/mnist/run_1/checkpoints/DriftDiT-Tiny-run_1-epoch=1109.ckpt
 output_dir: outputs/samples
 
 samples:

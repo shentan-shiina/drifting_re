@@ -5,16 +5,24 @@ defaults:
 seed: 42
 batch_size: 512
 num_workers: 4
-output_dir: outputs
-resume: null
-log_interval: 1
-save_interval: 10
+log_step_interval: 10
+save_interval: 1
 sample_interval: 1
-data_root: data
+data_root: /home/ubt/1git/drifting_re/data/
+output_dir: /home/ubt/1git/drifting_re/outputs/
+
+run_name: run_2
+resume_from_ckpt: true
+resume_dir: ${output_dir}/${dataset.name}/${run_name}/checkpoints
+resume_ckpt: last.ckpt
 
 hydra:
   run:
-    dir: ${output_dir}/${dataset.name}/${now:%Y%m%d_%H%M%S}
+    dir: ${output_dir}/${dataset.name}/${run_name}
   output_subdir: null
   job:
     chdir: true
+
+logger:
+
+  monitor: 'train_loss'

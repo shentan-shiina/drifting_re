@@ -51,8 +51,8 @@ class EMA:
         """Load EMA model state dict."""
         self.shadow.load_state_dict(state_dict)
 
-
-class WarmupLRScheduler:
+from torch.optim.lr_scheduler import LRScheduler
+class WarmupLRScheduler(LRScheduler):
     """Linear warmup then constant learning rate scheduler."""
 
     def __init__(
@@ -71,6 +71,7 @@ class WarmupLRScheduler:
         self.warmup_steps = warmup_steps
         self.base_lr = base_lr
         self.current_step = 0
+        super().__init__(optimizer)
 
     def step(self):
         """Update learning rate based on current step."""
@@ -166,7 +167,23 @@ def load_model_from_checkpoint(
         label_dropout=label_dropout,
     ).to(device)
 
-    state = checkpoint.get("ema", checkpoint.get("model"))
+    # 1. Try to load EMA weights first (injected by our EMACallback)
+    if "ema" in checkpoint:
+        print("Loading EMA weights from checkpoint...")
+        state = checkpoint["ema"]
+        
+    # 2. Fall back to standard model weights
+    else:
+        print("Loading standard model weights from checkpoint (EMA not found)...")
+        raw_state_dict = checkpoint["state_dict"]
+        state = {}
+        for k, v in raw_state_dict.items():
+            # Strip the 'model.' prefix that Lightning adds to wrapped modules
+            if k.startswith("model."):
+                new_key = k[len("model."):] 
+            else:
+                new_key = k
+            state[new_key] = v
     model.load_state_dict(state)
     model.eval()
     return model

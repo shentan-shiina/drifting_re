@@ -3,9 +3,10 @@ model: DriftDiT-Tiny
 
 use_feature_encoder: false
 use_latent: true
+use_flip: true
 
-img_size: 16
-in_channels: 4 # currently mnist does not support latent space training
+img_size: 128
+in_channels: 1
 num_classes: 10
 samples_per_class: 8
 batch_nc: 10
@@ -23,3 +24,13 @@ alpha_min: 1.0
 alpha_max: 3.0
 queue_size: 128
 label_dropout: 0.1
+
+mae:
+  epochs: 1000
+  lr: 0.001
+  weight_decay: 0.05
+  feature_dim: 512
+  base_width: 128
+  multi_scale: true
+  patch_size: 4
+  mask_ratio: 0.75

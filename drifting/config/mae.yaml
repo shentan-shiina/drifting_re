@@ -1,0 +1,13 @@
+defaults:
+  - config
+  - _self_
+
+use_flip: true
+
+batch_size: 64
+num_workers: 16
+
+save_interval: 1
+log_interval: 1
+
+

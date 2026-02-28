@@ -9,7 +9,7 @@ Phase 2: Use this encoder trained with MAE objective for better results
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Optional, List, Tuple
+from typing import Optional, List
 import torchvision.models as models
 
 
@@ -332,44 +332,53 @@ class MAEEncoder(nn.Module):
 
         return loss, pred, mask
 
-
 def create_feature_encoder(
     dataset: str = "cifar10",
+    in_channels: int = 3, # <-- Added to handle latent dimensions!
     feature_dim: int = 512,
     multi_scale: bool = True,
     use_pretrained: bool = True,
+    mae_checkpoint_path: Optional[str] = None, # <-- Added custom checkpoint path
 ):
-    """
-    Create a feature encoder for the specified dataset.
+    """Create a feature encoder for the specified dataset."""
 
-    Args:
-        dataset: "mnist" or "cifar10"
-        feature_dim: Output feature dimension (ignored for pretrained)
-        multi_scale: Whether to use multi-scale features
-        use_pretrained: Whether to use ImageNet-pretrained ResNet (for CIFAR)
-
-    Returns:
-        Feature encoder
-    """
-    if dataset.lower() == "mnist":
-        return MultiScaleFeatureEncoder(
-            in_channels=1,
-            base_width=64,
+    if mae_checkpoint_path:
+        print(f"Loading custom MAE pre-trained encoder from {mae_checkpoint_path}")
+        base_width = 64 if dataset.lower() == "mnist" else 128
+        
+        encoder = MultiScaleFeatureEncoder(
+            in_channels=in_channels,
+            base_width=base_width,
             blocks_per_stage=2,
             feature_dim=feature_dim,
             multi_scale=multi_scale,
         )
-    elif dataset.lower() in ["cifar10", "cifar"]:
+        
+        # Extract purely the encoder weights from the Lightning MAE checkpoint
+        ckpt = torch.load(mae_checkpoint_path, map_location="cpu", weights_only=False)
+        state_dict = ckpt["state_dict"]
+        encoder_state = {}
+        for k, v in state_dict.items():
+            if k.startswith("encoder."):
+                encoder_state[k.replace("encoder.", "")] = v
+            elif k.startswith("mae.encoder."):
+                encoder_state[k.replace("mae.encoder.", "")] = v
+                
+        encoder.load_state_dict(encoder_state)
+        return encoder
+
+    if dataset.lower() == "mnist":
+        return MultiScaleFeatureEncoder(
+            in_channels=1, base_width=64, blocks_per_stage=2,
+            feature_dim=feature_dim, multi_scale=multi_scale,
+        )
+    elif dataset.lower() in ["cifar10", "cifar", "imagenet"]:
         if use_pretrained:
-            # Use ImageNet-pretrained ResNet - returns multi-scale feature maps
             return PretrainedResNetEncoder(pretrained=True)
         else:
             return MultiScaleFeatureEncoder(
-                in_channels=3,
-                base_width=128,
-                blocks_per_stage=2,
-                feature_dim=feature_dim,
-                multi_scale=multi_scale,
+                in_channels=in_channels, base_width=128, blocks_per_stage=2,
+                feature_dim=feature_dim, multi_scale=multi_scale,
             )
     else:
         raise ValueError(f"Unknown dataset: {dataset}")

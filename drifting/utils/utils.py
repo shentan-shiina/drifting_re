@@ -11,7 +11,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from typing import Optional, Dict, Any
-from drifting.models.dit_drift import DriftDiT_models
+from drifting.models.drift_dit import DriftDiT_models
 import scipy.linalg
 
 def calculate_frechet_distance(mu1: np.ndarray, sigma1: np.ndarray, mu2: np.ndarray, sigma2: np.ndarray, eps: float = 1e-6) -> float:

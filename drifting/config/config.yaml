@@ -12,13 +12,18 @@ log_step_interval: 10
 save_interval: 1
 sample_interval: 1
 
-data_root: /home/ubt/1git/drifting_re/data/
-output_dir: /home/ubt/1git/drifting_re/outputs/
+workspace_root: /home/ubt/1git/drifting_re
+data_root: ${workspace_root}/data/
+latent_dir: ${data_root}/${dataset.name}/latents
 
-run_name: run_2_MNIST_l16
+output_dir: /media/ubt/45d39189-c24c-4259-b12e-1d5d5e6071cc/outputs/
+
+run_name: run_3_MNIST_l16_mae_128
 resume_from_ckpt: true
 resume_dir: ${output_dir}/${dataset.name}/${run_name}/checkpoints
+mae_checkpoint_dir: ${output_dir}/${dataset.name}/${run_name}/mae_checkpoints
 resume_ckpt: last.ckpt
+resume_mae_ckpt: last.ckpt
 
 hydra:
   run:

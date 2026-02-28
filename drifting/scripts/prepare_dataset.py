@@ -23,7 +23,7 @@ from drifting.utils.data_utils import get_dataset
 @torch.no_grad()
 def compute_latent_dataset(cfg: DictConfig, output_dir: Path, device: torch.device):
     """Encodes images to latents using VAE and saves them to disk."""
-    latent_dir = output_dir / "latents"
+    latent_dir = cfg.latent_dir
     latent_dir.mkdir(parents=True, exist_ok=True)
     
     ########### Load VAE ###########

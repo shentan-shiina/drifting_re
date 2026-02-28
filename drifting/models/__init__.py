@@ -5,7 +5,7 @@ A PyTorch reproduction of "Generative Modeling via Drifting" (Deng et al., 2026)
 for MNIST and CIFAR-10 datasets.
 """
 
-from .dit_drift import DriftDiT, DriftDiT_Tiny, DriftDiT_Small, DriftDiT_models
+from .drift_dit import DriftDiT, DriftDiT_Tiny, DriftDiT_Small, DriftDiT_models
 from .drifting import (
     compute_V,
     compute_V_multi_temperature,

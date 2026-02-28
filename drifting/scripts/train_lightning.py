@@ -35,7 +35,7 @@ def main(cfg: DictConfig):
         latent_dir = os.path.join(cfg.data_root, config["name"], "latents")
         train_dataset = LatentDataset(root=latent_dir, use_flip=config.get("latent_flip", True))
     else:
-        train_dataset, _ = get_dataset(config["name"], root=cfg.data_root)
+        train_dataset, _ = get_dataset(config["name"], root=cfg.data_root, resize=config["img_size"])
 
     train_loader = DataLoader(
         train_dataset, batch_size=cfg.batch_size, shuffle=True, 
@@ -65,7 +65,7 @@ def main(cfg: DictConfig):
         max_epochs=config["epochs"],
         callbacks=callbacks,
         accelerator="auto",
-        # precision="16-mixed",
+        precision="16-mixed",
         log_every_n_steps=cfg.log_step_interval,
     )
 

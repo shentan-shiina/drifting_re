@@ -33,7 +33,7 @@ def compute_latent_dataset(cfg: DictConfig, output_dir: Path, device: torch.devi
     
     ########### Load Dataset ###########
     dataset_cfg = OmegaConf.to_container(cfg.dataset, resolve=True)
-    dataset, _ = get_dataset(dataset_cfg["name"], root=cfg.data_root)
+    dataset, _ = get_dataset(dataset_cfg["name"], root=cfg.data_root, resize=dataset_cfg["img_size"])
     
     loader = DataLoader(
         dataset, 
@@ -86,7 +86,7 @@ def compute_fid_stats(cfg: DictConfig, output_dir: Path, device: torch.device):
     
     ########### Load Dataset ###########
     dataset_cfg = OmegaConf.to_container(cfg.dataset, resolve=True)
-    dataset, _ = get_dataset(dataset_cfg["name"], root=cfg.data_root)
+    dataset, _ = get_dataset(dataset_cfg["name"], root=cfg.data_root, resize=dataset_cfg["img_size"])
     
     loader = DataLoader(
         dataset, 

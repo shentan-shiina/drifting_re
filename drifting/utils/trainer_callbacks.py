@@ -47,7 +47,8 @@ class SamplingCallback(Callback):
                 ema_model,
                 self.config["in_channels"],
                 self.config["img_size"],
-                self.config["num_classes"],
+                # self.config["num_classes"],
+                10, # for imagenet-tiny test
                 pl_module.device,
                 self.config["samples_per_class"],
                 vae=vae_manager

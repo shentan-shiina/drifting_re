@@ -1,13 +1,13 @@
 defaults:
-  - dataset: cifar10
+  - dataset: imagenet-tiny
   - _self_
 
 seed: 42
-batch_size: 512
+batch_size: 256
 use_latent: ${dataset.use_latent}
 latent_flip: true
 
-num_workers: 4
+num_workers: 8
 log_step_interval: 10
 save_interval: 10
 sample_interval: 10
@@ -15,7 +15,7 @@ sample_interval: 10
 data_root: /home/ubt/1git/drifting_re/data/
 output_dir: /home/ubt/1git/drifting_re/outputs/
 
-run_name: run_2_latent_p4_512
+run_name: run_2_ImageNet-tiny_tiny
 resume_from_ckpt: true
 resume_dir: ${output_dir}/${dataset.name}/${run_name}/checkpoints
 resume_ckpt: last.ckpt

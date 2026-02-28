@@ -99,7 +99,7 @@ class DriftDiTModule(L.LightningModule):
                 labels_real = torch.zeros(x_real.shape[0], dtype=torch.long, device=self.device)
 
             ########### Preprocess Latent ###########
-            if self.config.use_latent:
+            if self.use_latent:
                 # Sample from the (B, C, H, W) distribution and normalize
                 x_real = self.vae_manager.sample_and_normalize(x_real)
 

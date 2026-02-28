@@ -336,6 +336,7 @@ def create_feature_encoder(
     dataset: str = "cifar10",
     in_channels: int = 3, # <-- Added to handle latent dimensions!
     feature_dim: int = 512,
+    base_width: int = 128,
     multi_scale: bool = True,
     use_pretrained: bool = True,
     mae_checkpoint_path: Optional[str] = None, # <-- Added custom checkpoint path
@@ -344,7 +345,6 @@ def create_feature_encoder(
 
     if mae_checkpoint_path:
         print(f"Loading custom MAE pre-trained encoder from {mae_checkpoint_path}")
-        base_width = 64 if dataset.lower() == "mnist" else 128
         
         encoder = MultiScaleFeatureEncoder(
             in_channels=in_channels,

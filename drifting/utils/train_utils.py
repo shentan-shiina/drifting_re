@@ -29,7 +29,6 @@ def sample_batch(queue: SampleQueue, num_classes: int, n_pos: int, device: torch
 
     return x_pos, labels
 
-
 def compute_drifting_loss(
     x_gen: torch.Tensor,
     labels_gen: torch.Tensor,
@@ -48,12 +47,18 @@ def compute_drifting_loss(
         feat_gen_list = [x_gen.flatten(start_dim=1)]
         feat_pos_list = [x_pos.flatten(start_dim=1)]
     else:
-        feat_gen_maps = feature_encoder(x_gen)
+        feat_gen_out = feature_encoder(x_gen)
         with torch.no_grad():
-            feat_pos_maps = feature_encoder(x_pos)
+            feat_pos_out = feature_encoder(x_pos)
 
-        feat_gen_list = [F.adaptive_avg_pool2d(f, 1).flatten(1) for f in feat_gen_maps]
-        feat_pos_list = [F.adaptive_avg_pool2d(f, 1).flatten(1) for f in feat_pos_maps]
+        # Check if the encoder returned a single flat tensor (MAE Encoder) 
+        # or a list of spatial feature maps (ResNet Encoder)
+        if isinstance(feat_gen_out, torch.Tensor):
+            feat_gen_list = [feat_gen_out]
+            feat_pos_list = [feat_pos_out]
+        else:
+            feat_gen_list = [F.adaptive_avg_pool2d(f, 1).flatten(1) for f in feat_gen_out]
+            feat_pos_list = [F.adaptive_avg_pool2d(f, 1).flatten(1) for f in feat_pos_out]
 
     total_loss = torch.tensor(0.0, device=device, requires_grad=True)
     total_drift_norm = 0.0

@@ -1,5 +1,5 @@
 defaults:
-  - dataset: mnist
+  - config
   - _self_
 
 compute_latent: true
@@ -9,7 +9,5 @@ vae_id: "stabilityai/sd-vae-ft-mse"
 batch_size: 64
 num_workers: 16
 
-data_root: /home/ubt/1git/drifting_re/data/
-output_dir: /home/ubt/1git/drifting_re/data/${dataset.name}
 
 

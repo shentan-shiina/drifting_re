@@ -31,7 +31,7 @@ def decode_latents(vae: nn.Module, latents: torch.Tensor, max_batch: int = 32, i
     decoded = []
     for i in range(0, latents.size(0), max_batch):
         batch = latents[i : i + max_batch]
-        out = vae.decode(batch).sample
+        out = vae.decode(batch)
         
         # Convert VAE's RGB output back to Grayscale for MNIST
         if is_mnist:
@@ -232,9 +232,9 @@ def sample_and_save(cfg: DictConfig):
     data_root = Path(cfg.data_root) if cfg.data_root else default_data_root
     data_root = Path(to_absolute_path(str(data_root)))
 
-    output_dir = Path.cwd()
+    output_dir = Path(cfg.sample_output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    print(f"Working directory (Hydra run dir): {output_dir}")
+    print(f"Working directory: {output_dir}")
 
     ckpt_path = Path(to_absolute_path(cfg.checkpoint))
     model = load_model_from_checkpoint(ckpt_path, config, device)

@@ -5,7 +5,7 @@ from lightning import Trainer, seed_everything
 from lightning.pytorch.callbacks import ModelCheckpoint
 from torch.utils.data import DataLoader
 from torch import set_float32_matmul_precision
-from drifting.models.dit_lightning import DriftDiTModule
+from drifting.models.driftdit_lightning import DriftDiTModule
 from drifting.utils.trainer_callbacks import EMACallback, SamplingCallback
 from drifting.utils.data_utils import get_dataset
 from lightning.pytorch.loggers import WandbLogger
@@ -27,11 +27,18 @@ def main(cfg: DictConfig):
 
     wandb_logger = WandbLogger(name="drift-lightning"+f"{config["model"]}-{cfg.run_name}")
     
-    last_checkpoint_path = os.path.join(cfg.resume_dir, 'last.ckpt')
+    last_checkpoint_path = os.path.join(cfg.resume_dir, cfg.resume_ckpt)
     last_checkpoint = last_checkpoint_path if os.path.exists(last_checkpoint_path) and cfg.resume_from_ckpt else None
 
     # Data Setup
     if cfg.use_latent:
+        config["img_size"] = config.get("img_size", 256) // 8
+        config["in_channels"] = 4
+        config["mae_checkpoint_path"] = cfg.get("mae_checkpoint_dir", None) + cfg.get("resume_mae_ckpt", None)
+
+        if not os.path.exists(config["mae_checkpoint_path"]):
+            raise FileNotFoundError(f"Failed to load MAE checkpoint at {config["mae_checkpoint_path"]}. Run pretrain MAE first.")
+
         latent_dir = os.path.join(cfg.data_root, config["name"], "latents")
         train_dataset = LatentDataset(root=latent_dir, use_flip=config.get("latent_flip", True))
     else:
@@ -66,6 +73,7 @@ def main(cfg: DictConfig):
         callbacks=callbacks,
         accelerator="auto",
         precision="16-mixed",
+        gradient_clip_val=config["grad_clip"],
         log_every_n_steps=cfg.log_step_interval,
     )
 

@@ -1,6 +1,6 @@
 import lightning as L
 import torch
-from drifting.models.dit_drift import DriftDiT_models
+from drifting.models.drift_dit import DriftDiT_models
 from drifting.models.feature_encoder import create_feature_encoder
 from drifting.utils.utils import SampleQueue, WarmupLRScheduler
 from drifting.utils.train_utils import sample_batch, compute_drifting_loss
@@ -18,6 +18,7 @@ class DriftDiTModule(L.LightningModule):
         self.config = config
         
         self.use_latent = config.get("use_latent", True)
+        mae_config = config.get("mae",None)
         if self.use_latent:
             self.vae_manager = VAEManager(vae_id="stabilityai/sd-vae-ft-mse")
 
@@ -40,12 +41,18 @@ class DriftDiTModule(L.LightningModule):
         ########### Feature Encoder Init ###########
         self.feature_encoder = None
         if config["use_feature_encoder"]:
+            # Check if we should use custom MAE or ImageNet ResNet
+            has_mae_ckpt = "mae_checkpoint_path" in config and config["mae_checkpoint_path"] is not None
+            
             self.feature_encoder = create_feature_encoder(
                 dataset=config["name"],
-                feature_dim=512,
-                multi_scale=True,
-                use_pretrained=True,
+                in_channels=config["in_channels"],
+                feature_dim=mae_config.get("feature_dim", 512),
+                multi_scale=mae_config.get("multi_scale", 512),
+                use_pretrained=not has_mae_ckpt, # Disable default ResNet if using MAE
+                mae_checkpoint_path=config.get("mae_checkpoint_path", None)
             )
+            
             self.feature_encoder.eval()
             for param in self.feature_encoder.parameters():
                 param.requires_grad = False
@@ -92,7 +99,7 @@ class DriftDiTModule(L.LightningModule):
                 labels_real = torch.zeros(x_real.shape[0], dtype=torch.long, device=self.device)
 
             ########### Preprocess Latent ###########
-            if self.use_latent:
+            if self.config.use_latent:
                 # Sample from the (B, C, H, W) distribution and normalize
                 x_real = self.vae_manager.sample_and_normalize(x_real)
 

@@ -1,13 +1,13 @@
 defaults:
-  - dataset: imagenet-tiny
+  - dataset: mnist
   - _self_
 
-compute_latent: false
+compute_latent: true
 compute_fid: true
 vae_id: "stabilityai/sd-vae-ft-mse"
 
-batch_size: 256
-num_workers: 4
+batch_size: 64
+num_workers: 16
 
 data_root: /home/ubt/1git/drifting_re/data/
 output_dir: /home/ubt/1git/drifting_re/data/${dataset.name}

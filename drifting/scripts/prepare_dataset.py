@@ -49,6 +49,10 @@ def compute_latent_dataset(cfg: DictConfig, output_dir: Path, device: torch.devi
     for batch in tqdm(loader, desc="Encoding Latents"):
         images, labels = batch[0].to(device), batch[1].to(device)
 
+        # FAKE RGB FOR MNIST
+        if images.shape[1] == 1:
+            images = images.repeat(1, 3, 1, 1)
+
         # Encode to latent distribution
         latent_dist = vae.encode(images).latent_dist
         

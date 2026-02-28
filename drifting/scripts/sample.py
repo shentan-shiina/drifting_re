@@ -23,7 +23,7 @@ from drifting.utils.utils import save_image_grid, set_seed, load_model_from_chec
 #                 VAE Helper Function                 #
 #######################################################
 @torch.no_grad()
-def decode_latents(vae: nn.Module, latents: torch.Tensor, max_batch: int = 32) -> torch.Tensor:
+def decode_latents(vae: nn.Module, latents: torch.Tensor, max_batch: int = 32, is_mnist: bool = False) -> torch.Tensor:
     """Safely decode latents in chunks to prevent CUDA OOM."""
     if vae is None:
         return latents
@@ -31,7 +31,13 @@ def decode_latents(vae: nn.Module, latents: torch.Tensor, max_batch: int = 32) -
     decoded = []
     for i in range(0, latents.size(0), max_batch):
         batch = latents[i : i + max_batch]
-        decoded.append(vae.decode(batch))
+        out = vae.decode(batch).sample
+        
+        # Convert VAE's RGB output back to Grayscale for MNIST
+        if is_mnist:
+            out = out.mean(dim=1, keepdim=True)
+            
+        decoded.append(out)
     return torch.cat(decoded, dim=0)
 
 #######################################################

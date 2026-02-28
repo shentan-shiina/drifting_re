@@ -62,7 +62,7 @@ class DriftDiTModule(L.LightningModule):
 
             ########### Preprocess Latent ###########
             if self.use_latent:
-                # Sample from the (B, 8, H, W) distribution and normalize
+                # Sample from the (B, C, H, W) distribution and normalize
                 x_real = self.vae_manager.sample_and_normalize(x_real)
 
             self.queue.add(x_real.cpu(), labels_real.cpu())

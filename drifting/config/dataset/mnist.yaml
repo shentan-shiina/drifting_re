@@ -4,7 +4,7 @@ model: DriftDiT-Tiny
 use_feature_encoder: false
 use_latent: false
 
-img_size: 128
+img_size: 8
 in_channels: 1 # currently mnist does not support latent space training
 num_classes: 10
 samples_per_class: 8

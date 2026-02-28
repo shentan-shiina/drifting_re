@@ -53,6 +53,37 @@ class DriftDiTModule(L.LightningModule):
     def forward(self, x, labels, alpha, force_drop_ids=None):
         return self.model(x, labels, alpha, force_drop_ids)
 
+    def on_train_start(self):
+            """Pre-fill the sample queue to completely prevent skipped training steps."""
+            if self.queue.is_ready(self.config["batch_n_pos"]):
+                return
+
+            print("\nPre-filling sample queue before training starts...")
+            
+            # Access the dataloader directly from Lightning
+            train_loader = self.trainer.train_dataloader
+            
+            for batch in train_loader:
+                if isinstance(batch, (list, tuple)):
+                    x_real, labels_real = batch[0], batch[1]
+                else:
+                    x_real = batch
+                    labels_real = torch.zeros(x_real.shape[0], dtype=torch.long)
+
+                # Apply Latent VAE logic if necessary
+                if getattr(self, "use_latent", False):
+                    x_real = x_real.to(self.device)
+                    with torch.no_grad():
+                        x_real = self.vae_manager.sample_and_normalize(x_real)
+                
+                # Push to queue
+                self.queue.add(x_real.cpu(), labels_real.cpu())
+                
+                # Stop filling once the queue has enough samples for every class
+                if self.queue.is_ready(self.config["batch_n_pos"]):
+                    print("Sample queue is fully pre-filled! Training will now begin.")
+                    break
+
     def training_step(self, batch, batch_idx):
             if isinstance(batch, (list, tuple)):
                 x_real, labels_real = batch[0], batch[1]
@@ -113,16 +144,24 @@ class DriftDiTModule(L.LightningModule):
             return loss
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(
-            self.model.parameters(),
-            lr=self.config["lr"],
-            betas=(0.9, 0.95),
-            weight_decay=self.config["weight_decay"],
-        )
+            optimizer = torch.optim.AdamW(
+                self.model.parameters(),
+                lr=self.config["lr"],
+                betas=(0.9, 0.95),
+                weight_decay=self.config["weight_decay"],
+            )
 
-        scheduler = WarmupLRScheduler(
-            optimizer,
-            warmup_steps=self.config["warmup_steps"],
-            base_lr=self.config["lr"],
-        )
-        return {"optimizer": optimizer, "lr_scheduler": scheduler}
+            scheduler = WarmupLRScheduler(
+                optimizer,
+                warmup_steps=self.config["warmup_steps"],
+                base_lr=self.config["lr"],
+            )
+            
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                    "interval": "step",
+                    "frequency": 1,
+                }
+            }

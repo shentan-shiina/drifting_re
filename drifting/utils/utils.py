@@ -74,6 +74,8 @@ class EMA:
         self.shadow.load_state_dict(state_dict)
 
 from torch.optim.lr_scheduler import LRScheduler
+from torch.optim.lr_scheduler import LRScheduler
+
 class WarmupLRScheduler(LRScheduler):
     """Linear warmup then constant learning rate scheduler."""
 
@@ -82,45 +84,25 @@ class WarmupLRScheduler(LRScheduler):
         optimizer: torch.optim.Optimizer,
         warmup_steps: int,
         base_lr: float,
+        last_epoch: int = -1
     ):
-        """
-        Args:
-            optimizer: The optimizer to schedule
-            warmup_steps: Number of warmup steps
-            base_lr: Target learning rate after warmup
-        """
-        self.optimizer = optimizer
-        self.warmup_steps = warmup_steps
-        self.base_lr = base_lr
-        self.current_step = 0
-        super().__init__(optimizer)
+        self.warmup_steps = max(1, warmup_steps) # Prevent division by zero
+        self.target_lr = base_lr
+        # The base class automatically handles state_dict, load_state_dict, 
+        # and calling step() via tracking `self.last_epoch`.
+        super().__init__(optimizer, last_epoch)
 
-    def step(self):
-        """Update learning rate based on current step."""
-        self.current_step += 1
-        lr = self.get_lr()
-        for param_group in self.optimizer.param_groups:
-            param_group["lr"] = lr
-
-    def get_lr(self) -> float:
-        """Compute current learning rate."""
-        if self.current_step < self.warmup_steps:
-            return self.base_lr * self.current_step / self.warmup_steps
-        return self.base_lr
-
-    def state_dict(self) -> Dict[str, Any]:
-        """Return scheduler state."""
-        return {
-            "current_step": self.current_step,
-            "warmup_steps": self.warmup_steps,
-            "base_lr": self.base_lr,
-        }
-
-    def load_state_dict(self, state_dict: Dict[str, Any]):
-        """Load scheduler state."""
-        self.current_step = state_dict["current_step"]
-        self.warmup_steps = state_dict["warmup_steps"]
-        self.base_lr = state_dict["base_lr"]
+    def get_lr(self):
+        """Compute current learning rate natively."""
+        step = self.last_epoch
+        
+        if step < self.warmup_steps:
+            # Linear warmup
+            lr = self.target_lr * (step / self.warmup_steps)
+            return [lr for _ in self.base_lrs]
+            
+        # Constant LR after warmup
+        return [self.target_lr for _ in self.base_lrs]
 
 
 def save_checkpoint(

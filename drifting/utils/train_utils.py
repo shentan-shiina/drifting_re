@@ -3,14 +3,14 @@ Training utilities for Drifting models.
 Separates per-step logic from the training entrypoint.
 """
 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from drifting.models.drifting import compute_V
+from drifting.models.drifting import compute_V, compute_V_multi_temperature
 from drifting.utils.utils import SampleQueue
 
 
@@ -29,6 +29,48 @@ def sample_batch(queue: SampleQueue, num_classes: int, n_pos: int, device: torch
 
     return x_pos, labels
 
+def _normalize_feature_block(features: List[torch.Tensor]) -> List[torch.Tensor]:
+    """Shared feature normalization so distances are scale-free (Sec. A.6)."""
+    concat = torch.cat(features, dim=0)
+    # Stop-grad on normalization statistics to mimic paper's sg on Sj
+    mean = concat.mean(dim=0, keepdim=True).detach()
+    std = concat.std(dim=0, keepdim=True).clamp_min(1e-6).detach()
+    feat_std = (concat - mean) / std
+
+    # Scale so avg pairwise distance ~= sqrt(D)
+    with torch.no_grad():
+        n = min(feat_std.shape[0], 256)
+        idx = torch.randperm(feat_std.shape[0], device=feat_std.device)[:n]
+        subset = feat_std[idx]
+        if n > 1:
+            dists = torch.cdist(subset, subset, p=2)
+            mask = ~torch.eye(n, dtype=torch.bool, device=feat_std.device)
+            avg_dist = dists[mask].mean()
+            scale = (feat_std.shape[1] ** 0.5) / (avg_dist + 1e-8)
+        else:
+            scale = 1.0
+
+    feat_norm = feat_std * scale
+    splits = []
+    start = 0
+    for f in features:
+        end = start + f.shape[0]
+        splits.append(feat_norm[start:end])
+        start = end
+    return splits
+
+
+def _prepare_features(x: torch.Tensor, encoder: Optional[nn.Module], use_pixel_space: bool) -> List[torch.Tensor]:
+    """Return a list of pooled feature tensors."""
+    if use_pixel_space or encoder is None:
+        return [x.flatten(start_dim=1).float()]
+
+    feat_out = encoder(x.float())
+    if isinstance(feat_out, torch.Tensor):
+        return [feat_out]
+    return [F.adaptive_avg_pool2d(f, 1).flatten(1) for f in feat_out]
+
+
 def compute_drifting_loss(
     x_gen: torch.Tensor,
     labels_gen: torch.Tensor,
@@ -38,29 +80,15 @@ def compute_drifting_loss(
     temperatures: list,
     use_pixel_space: bool = False,
 ) -> Tuple[torch.Tensor, dict]:
-    """Compute class-conditional drifting loss with multi-scale features."""
+    """Compute class-conditional drifting loss with feature/drift normalization."""
     device = x_gen.device
     num_classes = labels_gen.max().item() + 1
 
-    # Extract features
-    if use_pixel_space or feature_encoder is None:
-        feat_gen_list = [x_gen.flatten(start_dim=1)]
-        feat_pos_list = [x_pos.flatten(start_dim=1)]
-    else:
-        feat_gen_out = feature_encoder(x_gen)
-        with torch.no_grad():
-            feat_pos_out = feature_encoder(x_pos)
+    feat_gen_list = _prepare_features(x_gen, feature_encoder, use_pixel_space)
+    with torch.no_grad():
+        feat_pos_list = _prepare_features(x_pos, feature_encoder, use_pixel_space)
 
-        # Check if the encoder returned a single flat tensor (MAE Encoder) 
-        # or a list of spatial feature maps (ResNet Encoder)
-        if isinstance(feat_gen_out, torch.Tensor):
-            feat_gen_list = [feat_gen_out]
-            feat_pos_list = [feat_pos_out]
-        else:
-            feat_gen_list = [F.adaptive_avg_pool2d(f, 1).flatten(1) for f in feat_gen_out]
-            feat_pos_list = [F.adaptive_avg_pool2d(f, 1).flatten(1) for f in feat_pos_out]
-
-    total_loss = torch.tensor(0.0, device=device, requires_grad=True)
+    total_loss = 0.0
     total_drift_norm = 0.0
     num_losses = 0
 
@@ -74,30 +102,38 @@ def compute_drifting_loss(
         for feat_gen, feat_pos in zip(feat_gen_list, feat_pos_list):
             feat_gen_c = feat_gen[mask_gen]
             feat_pos_c = feat_pos[mask_pos]
+            if feat_gen_c.numel() == 0 or feat_pos_c.numel() == 0:
+                continue
+
+            # Negatives are the conditional batch itself (Alg. 1)
             feat_neg_c = feat_gen_c
 
-            feat_gen_c_norm = F.normalize(feat_gen_c, p=2, dim=1)
-            feat_pos_c_norm = F.normalize(feat_pos_c, p=2, dim=1)
-            feat_neg_c_norm = F.normalize(feat_neg_c, p=2, dim=1)
+            norm_gen, norm_pos, norm_neg = _normalize_feature_block([
+                feat_gen_c,
+                feat_pos_c,
+                feat_neg_c,
+            ])
 
-            V_total = torch.zeros_like(feat_gen_c_norm)
-            for tau in temperatures:
-                V_tau = compute_V(
-                    feat_gen_c_norm,
-                    feat_pos_c_norm,
-                    feat_neg_c_norm,
-                    tau,
-                    mask_self=True,
-                )
-                v_norm = torch.sqrt(torch.mean(V_tau ** 2) + 1e-8)
-                V_total = V_total + V_tau / (v_norm + 1e-8)
+            # Drifting field (multi-temperature, already normalized per-temp)
+            dim_scale = norm_gen.shape[1] ** 0.5
+            temps_scaled = [tau * dim_scale for tau in temperatures]
 
-            target = (feat_gen_c_norm + V_total).detach()
-            loss_scale = F.mse_loss(feat_gen_c_norm, target)
+            # Per-paper: normalize each V_tau, then sum; do not renormalize the sum
+            V_total = compute_V_multi_temperature(
+                norm_gen,
+                norm_pos,
+                norm_neg,
+                temps_scaled,
+                mask_self=True,
+                normalize_each=True,
+            ).float()
 
-            total_loss = total_loss + loss_scale
-            total_drift_norm += (V_total ** 2).mean().item() ** 0.5
-            num_losses += 1
+            target = (norm_gen + V_total).detach()
+            loss_c = F.mse_loss(norm_gen, target)
+
+            total_loss = total_loss + loss_c * norm_gen.shape[0]
+            total_drift_norm += torch.mean(V_total ** 2).item() ** 0.5 * norm_gen.shape[0]
+            num_losses += norm_gen.shape[0]
 
     if num_losses == 0:
         return torch.tensor(0.0, device=device, requires_grad=True), {"loss": 0.0, "drift_norm": 0.0}

@@ -30,14 +30,19 @@ def compute_V(
     Returns:
         V: Drifting field, shape (N, D)
     """
-    N = x.shape[0]
-    N_pos = y_pos.shape[0]
-    N_neg = y_neg.shape[0]
-    device = x.device
+    # Compute in float32 for numerical stability
+    x_f = x.float()
+    y_pos_f = y_pos.float()
+    y_neg_f = y_neg.float()
+
+    N = x_f.shape[0]
+    N_pos = y_pos_f.shape[0]
+    N_neg = y_neg_f.shape[0]
+    device = x_f.device
 
     # 1. Compute pairwise L2 distances
-    dist_pos = torch.cdist(x, y_pos, p=2)  # (N, N_pos)
-    dist_neg = torch.cdist(x, y_neg, p=2)  # (N, N_neg)
+    dist_pos = torch.cdist(x_f, y_pos_f, p=2)  # (N, N_pos)
+    dist_neg = torch.cdist(x_f, y_neg_f, p=2)  # (N, N_neg)
 
     # 2. Mask self-distances (when y_neg contains x)
     if mask_self and N == N_neg:
@@ -70,7 +75,7 @@ def compute_V(
 
     V = drift_pos - drift_neg
 
-    return V
+    return V.to(x.dtype)
 
 
 def compute_V_multi_temperature(
@@ -98,7 +103,7 @@ def compute_V_multi_temperature(
     Returns:
         V: Combined drifting field, shape (N, D)
     """
-    V_total = torch.zeros_like(x)
+    V_total = torch.zeros_like(x, dtype=torch.float32)
 
     for tau in temperatures:
         V_tau = compute_V(x, y_pos, y_neg, tau, mask_self)
@@ -110,7 +115,7 @@ def compute_V_multi_temperature(
 
         V_total = V_total + V_tau
 
-    return V_total
+    return V_total.to(x.dtype)
 
 
 def normalize_features(
@@ -118,6 +123,7 @@ def normalize_features(
     scale: Optional[float] = None,
     mean: Optional[torch.Tensor] = None,
     std: Optional[torch.Tensor] = None,
+    target_scale: Optional[float] = None,
 ) -> Tuple[torch.Tensor, float, torch.Tensor, torch.Tensor]:
     """
     Normalize features by standardizing to zero mean and unit variance per dimension,
@@ -145,20 +151,23 @@ def normalize_features(
     features_std = (features - mean) / std
 
     if scale is None:
-        # Compute scale to achieve target average pairwise distance
-        with torch.no_grad():
-            # Sample subset for efficiency
-            n_sample = min(features.shape[0], 256)
-            idx = torch.randperm(features.shape[0], device=features.device)[:n_sample]
-            subset = features_std[idx]
+        if target_scale is not None:
+            scale = target_scale
+        else:
+            # Compute scale to achieve target average pairwise distance
+            with torch.no_grad():
+                # Sample subset for efficiency
+                n_sample = min(features.shape[0], 256)
+                idx = torch.randperm(features.shape[0], device=features.device)[:n_sample]
+                subset = features_std[idx]
 
-            dists = torch.cdist(subset, subset, p=2)
-            # Exclude diagonal
-            mask = ~torch.eye(n_sample, dtype=torch.bool, device=features.device)
-            avg_dist = dists[mask].mean()
+                dists = torch.cdist(subset, subset, p=2)
+                # Exclude diagonal
+                mask = ~torch.eye(n_sample, dtype=torch.bool, device=features.device)
+                avg_dist = dists[mask].mean()
 
-            # Scale to target distance
-            scale = (target_dist / (avg_dist + 1e-8)).item()
+                # Scale to target distance
+                scale = (target_dist / (avg_dist + 1e-8)).item()
 
     return features_std * scale, scale, mean, std
 

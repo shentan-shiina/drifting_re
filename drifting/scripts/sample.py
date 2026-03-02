@@ -13,10 +13,6 @@ from omegaconf import DictConfig, OmegaConf
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
-from tqdm import tqdm
-
-from drifting.utils.data_utils import get_dataset
 from drifting.utils.utils import save_image_grid, set_seed, load_model_from_checkpoint, calculate_frechet_distance
 
 #######################################################
@@ -222,7 +218,10 @@ def sample_and_save(cfg: DictConfig):
     # Initialize VAE if operating in latent space
     vae_manager = None
     if config.get("use_latent", False):
-        from drifting.utils.vae_utils import VAEManager # Assuming you saved it here
+        config["in_channels"] = 4
+        config["img_size"] = config.get("img_size", 256) // 8
+        
+        from drifting.utils.vae_utils import VAEManager
         print("Loading VAE Manager for latent decoding...")
         vae_manager = VAEManager().to(device)
         vae_manager.eval()

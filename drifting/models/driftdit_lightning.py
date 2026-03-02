@@ -61,114 +61,103 @@ class DriftDiTModule(L.LightningModule):
         return self.model(x, labels, alpha, force_drop_ids)
 
     def on_train_start(self):
-            """Pre-fill the sample queue to completely prevent skipped training steps."""
-            if self.queue.is_ready(self.config["batch_n_pos"]):
-                return
+        """Pre-fill the sample queue to avoid wasted early steps."""
+        if self.queue.is_ready(self.config["batch_n_pos"]):
+            return
 
-            print("\nPre-filling sample queue before training starts...")
-            
-            # Access the dataloader directly from Lightning
-            train_loader = self.trainer.train_dataloader
-            
-            for batch in train_loader:
-                if isinstance(batch, (list, tuple)):
-                    x_real, labels_real = batch[0], batch[1]
-                else:
-                    x_real = batch
-                    labels_real = torch.zeros(x_real.shape[0], dtype=torch.long)
+        print("\nPre-filling sample queue before training starts...")
+        train_loader = self.trainer.train_dataloader
 
-                # Apply Latent VAE logic if necessary
-                if getattr(self, "use_latent", False):
-                    x_real = x_real.to(self.device)
-                    with torch.no_grad():
-                        x_real = self.vae_manager.sample_and_normalize(x_real)
-                
-                # Push to queue
-                self.queue.add(x_real.cpu(), labels_real.cpu())
-                
-                # Stop filling once the queue has enough samples for every class
-                if self.queue.is_ready(self.config["batch_n_pos"]):
-                    print("Sample queue is fully pre-filled! Training will now begin.")
-                    break
-
-    def training_step(self, batch, batch_idx):
+        for batch in train_loader:
             if isinstance(batch, (list, tuple)):
                 x_real, labels_real = batch[0], batch[1]
             else:
                 x_real = batch
-                labels_real = torch.zeros(x_real.shape[0], dtype=torch.long, device=self.device)
+                labels_real = torch.zeros(x_real.shape[0], dtype=torch.long)
 
-            ########### Preprocess Latent ###########
-            if self.use_latent:
-                # Sample from the (B, C, H, W) distribution and normalize
-                x_real = self.vae_manager.sample_and_normalize(x_real)
+            if getattr(self, "use_latent", False):
+                x_real = x_real.to(self.device)
+                with torch.no_grad():
+                    x_real = self.vae_manager.sample_and_normalize(x_real)
 
             self.queue.add(x_real.cpu(), labels_real.cpu())
 
-            # Skip step if queue isn't ready
-            if not self.queue.is_ready(self.config["batch_n_pos"]):
-                return None 
-            
-            num_classes = self.config["num_classes"]
-            n_pos = self.config["batch_n_pos"]
-            n_neg = self.config["batch_n_neg"]
-            alpha_min = self.config["alpha_min"]
-            alpha_max = self.config["alpha_max"]
-            temperatures = self.config["temperatures"]
-            use_pixel = not self.config["use_feature_encoder"]
-            batch_size = num_classes * n_neg
+            if self.queue.is_ready(self.config["batch_n_pos"]):
+                print("Sample queue is fully pre-filled! Training will now begin.")
+                break
 
-            ########### Generate Samples ###########
-            labels = torch.arange(num_classes, device=self.device).repeat_interleave(n_neg)
-            alpha = torch.empty(batch_size, device=self.device).uniform_(alpha_min, alpha_max)
-            noise = torch.randn(
-                batch_size,
-                self.config["in_channels"],
-                self.config["img_size"],
-                self.config["img_size"],
-                device=self.device,
-            )
+    def training_step(self, batch, batch_idx):
+        if isinstance(batch, (list, tuple)):
+            x_real, labels_real = batch[0], batch[1]
+        else:
+            x_real = batch
+            labels_real = torch.zeros(x_real.shape[0], dtype=torch.long, device=self.device)
 
-            # Forward Pass
-            x_gen = self.model(noise, labels, alpha)
-            x_pos, labels_pos = sample_batch(self.queue, num_classes, n_pos, self.device)
+        if self.use_latent:
+            x_real = self.vae_manager.sample_and_normalize(x_real)
 
-            ########### Metrics ###########
-            loss, info = compute_drifting_loss(
-                x_gen,
-                labels,
-                x_pos,
-                labels_pos,
-                self.feature_encoder,
-                temperatures,
-                use_pixel_space=use_pixel,
-            )
+        self.queue.add(x_real.cpu(), labels_real.cpu())
 
-            self.log("train_loss", loss, prog_bar=True)
-            if "drift_norm" in info:
-                self.log("drift_norm", info["drift_norm"], prog_bar=True)
+        if not self.queue.is_ready(self.config["batch_n_pos"]):
+            return None
 
-            return loss
+        num_classes = self.config["num_classes"]
+        n_pos = self.config["batch_n_pos"]
+        n_neg = self.config["batch_n_neg"]
+        alpha_min = self.config["alpha_min"]
+        alpha_max = self.config["alpha_max"]
+        temperatures = self.config["temperatures"]
+        use_pixel = not self.config["use_feature_encoder"]
+        batch_size = num_classes * n_neg
+
+        labels = torch.arange(num_classes, device=self.device).repeat_interleave(n_neg)
+        alpha = torch.empty(batch_size, device=self.device).uniform_(alpha_min, alpha_max)
+        noise = torch.randn(
+            batch_size,
+            self.config["in_channels"],
+            self.config["img_size"],
+            self.config["img_size"],
+            device=self.device,
+        )
+
+        x_gen = self.model(noise, labels, alpha)
+        x_pos, labels_pos = sample_batch(self.queue, num_classes, n_pos, self.device)
+
+        loss, info = compute_drifting_loss(
+            x_gen,
+            labels,
+            x_pos,
+            labels_pos,
+            self.feature_encoder,
+            temperatures,
+            use_pixel_space=use_pixel,
+        )
+
+        self.log("train_loss", loss, prog_bar=True)
+        if "drift_norm" in info:
+            self.log("drift_norm", info["drift_norm"], prog_bar=True)
+
+        return loss
 
     def configure_optimizers(self):
-            optimizer = torch.optim.AdamW(
-                self.model.parameters(),
-                lr=self.config["lr"],
-                betas=(0.9, 0.95),
-                weight_decay=self.config["weight_decay"],
-            )
+        optimizer = torch.optim.AdamW(
+            self.model.parameters(),
+            lr=self.config["lr"],
+            betas=(0.9, 0.95),
+            weight_decay=self.config["weight_decay"],
+        )
 
-            scheduler = WarmupLRScheduler(
-                optimizer,
-                warmup_steps=self.config["warmup_steps"],
-                base_lr=self.config["lr"],
-            )
-            
-            return {
-                "optimizer": optimizer,
-                "lr_scheduler": {
-                    "scheduler": scheduler,
-                    "interval": "step",
-                    "frequency": 1,
-                }
-            }
+        scheduler = WarmupLRScheduler(
+            optimizer,
+            warmup_steps=self.config["warmup_steps"],
+            base_lr=self.config["lr"],
+        )
+
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "step",
+                "frequency": 1,
+            },
+        }

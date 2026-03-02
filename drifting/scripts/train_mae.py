@@ -24,7 +24,10 @@ def main(cfg: DictConfig):
     seed_everything(cfg.seed, workers=True)
     config = OmegaConf.to_container(cfg.dataset, resolve=True)
     
-    wandb_logger = WandbLogger(name="drift-mae"+f"{config["model"]}-{cfg.run_name}")
+    wandb_logger = WandbLogger(
+        project="drift-mae",
+        name=f"{config['model']}-{cfg.run_name}"
+    )
     
     last_checkpoint_path = os.path.join(cfg.mae_checkpoint_dir, cfg.resume_mae_ckpt)
     last_checkpoint = last_checkpoint_path if os.path.exists(last_checkpoint_path) and cfg.resume_from_ckpt else None

@@ -29,6 +29,18 @@ def sample_batch(queue: SampleQueue, num_classes: int, n_pos: int, device: torch
 
     return x_pos, labels
 
+
+def sample_unconditional(queue: SampleQueue, n: int, device: torch.device) -> torch.Tensor:
+    """Sample unconditional negatives uniformly across classes from the queue."""
+    samples = []
+    classes = [c for c in queue.queues.keys() if queue.counts[c] > 0]
+    if not classes:
+        raise ValueError("Queue is empty; cannot sample unconditional negatives.")
+    for _ in range(n):
+        c = int(torch.randint(0, len(classes), (1,), device=device).item())
+        samples.append(queue.sample(classes[c], 1, device))
+    return torch.cat(samples, dim=0)
+
 def _normalize_feature_block(features: List[torch.Tensor]) -> List[torch.Tensor]:
     """Shared feature normalization so distances are scale-free (Sec. A.6)."""
     concat = torch.cat(features, dim=0)
@@ -79,6 +91,8 @@ def compute_drifting_loss(
     feature_encoder: Optional[nn.Module],
     temperatures: list,
     use_pixel_space: bool = False,
+    x_uncond_neg: Optional[torch.Tensor] = None,
+    neg_weight: float = 1.0,
 ) -> Tuple[torch.Tensor, dict]:
     """Compute class-conditional drifting loss with feature/drift normalization."""
     device = x_gen.device
@@ -87,6 +101,7 @@ def compute_drifting_loss(
     feat_gen_list = _prepare_features(x_gen, feature_encoder, use_pixel_space)
     with torch.no_grad():
         feat_pos_list = _prepare_features(x_pos, feature_encoder, use_pixel_space)
+        feat_uncond_list = _prepare_features(x_uncond_neg, feature_encoder, use_pixel_space) if x_uncond_neg is not None else None
 
     total_loss = 0.0
     total_drift_norm = 0.0
@@ -107,6 +122,10 @@ def compute_drifting_loss(
 
             # Negatives are the conditional batch itself (Alg. 1)
             feat_neg_c = feat_gen_c
+            if feat_uncond_list is not None and neg_weight > 0:
+                feat_uncond = feat_uncond_list[0] if len(feat_uncond_list) == 1 else torch.cat(feat_uncond_list, dim=0)
+                repeat = max(1, int(round(neg_weight)))
+                feat_neg_c = torch.cat([feat_neg_c, feat_uncond.repeat(repeat, 1)], dim=0)
 
             norm_gen, norm_pos, norm_neg = _normalize_feature_block([
                 feat_gen_c,

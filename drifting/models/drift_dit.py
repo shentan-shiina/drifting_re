@@ -338,80 +338,86 @@ class DriftDiT(nn.Module):
         cond, uncond = out.chunk(2, dim=0)
         return uncond + alpha * (cond - uncond)
 
-
-def DriftDiT_Tiny(img_size=32, in_channels=3, num_classes=10, **kwargs):
+def DriftDiT_Tiny(img_size=32, patch_size=4, num_register_tokens=8, in_channels=3, num_classes=10, label_dropout=0.1):
     """DriftDiT-Tiny: depth=6, hidden_dim=256, heads=4 -> ~5M params"""
     return DriftDiT(
         img_size=img_size,
-        patch_size=4,
+        patch_size=patch_size,
         in_channels=in_channels,
         hidden_size=256,
         depth=6,
         num_heads=4,
         mlp_ratio=4.0,
         num_classes=num_classes,
-        **kwargs,
+        label_dropout=label_dropout,
+        num_register_tokens=num_register_tokens,
     )
 
-
-def DriftDiT_Small(img_size=32, in_channels=3, num_classes=10, **kwargs):
-    """DriftDiT-Small: depth=8, hidden_dim=384, heads=6 -> ~15M params"""
+def DriftDiT_Small(img_size=32, patch_size=4, num_register_tokens=8, in_channels=3, num_classes=10, label_dropout=0.1):
+    """DriftDiT-Small: depth=12, hidden_dim=384, heads=6 -> ~15M params"""
     return DriftDiT(
         img_size=img_size,
-        patch_size=4,
+        patch_size=patch_size,
         in_channels=in_channels,
         hidden_size=384,
         depth=12,
         num_heads=6,
         mlp_ratio=6.0,
         num_classes=num_classes,
-        **kwargs,
+        label_dropout=label_dropout,
+        num_register_tokens=num_register_tokens,
     )
 
-def DriftDiT_Big(img_size=32, in_channels=3, num_classes=10, **kwargs):
-    """DriftDiT-Small: depth=8, hidden_dim=384, heads=6 -> ~15M params"""
+def DriftDiT_Big(img_size=32, patch_size=4, num_register_tokens=8, in_channels=3, num_classes=10, label_dropout=0.1):
+    """DriftDiT-Big: depth=12, hidden_dim=768, heads=12 -> ~40M params"""
     return DriftDiT(
         img_size=img_size,
-        patch_size=4,
+        patch_size=patch_size,
         in_channels=in_channels,
         hidden_size=768,
         depth=12,
         num_heads=12,
         mlp_ratio=6.0,
         num_classes=num_classes,
-        **kwargs,
+        label_dropout=label_dropout,
+        num_register_tokens=num_register_tokens,
     )
 
-def DriftDiT_Large(img_size=32, in_channels=3, num_classes=10, **kwargs):
-    """DriftDiT-Small: depth=8, hidden_dim=384, heads=6 -> ~15M params"""
+def DriftDiT_Large(img_size=32, patch_size=4, num_register_tokens=16, in_channels=3, num_classes=10, label_dropout=0.1):
+    """DriftDiT-Large: depth=24, hidden_dim=1024, heads=16 -> ~80M params"""
     return DriftDiT(
         img_size=img_size,
-        patch_size=4,
+        patch_size=patch_size,
         in_channels=in_channels,
         hidden_size=1024,
         depth=24,
         num_heads=16,
         mlp_ratio=6.0,
         num_classes=num_classes,
-        **kwargs,
+        label_dropout=label_dropout,
+        num_register_tokens=num_register_tokens,
     )
 
-def DriftDiT_XLarge(img_size=32, in_channels=3, num_classes=10, **kwargs):
+def DriftDiT_XLarge(img_size=32, patch_size=4, num_register_tokens=16, in_channels=3, num_classes=10, label_dropout=0.1):
     """DriftDiT-Small: depth=8, hidden_dim=384, heads=6 -> ~15M params"""
     return DriftDiT(
         img_size=img_size,
-        patch_size=4,
+        patch_size=patch_size,
         in_channels=in_channels,
         hidden_size=1152,
         depth=24,
         num_heads=16,
         mlp_ratio=6.0,
         num_classes=num_classes,
-        **kwargs,
+        label_dropout=label_dropout,
+        num_register_tokens=num_register_tokens,
     )
 
 # Model registry
 DriftDiT_models = {
     "DriftDiT-Tiny": DriftDiT_Tiny,
     "DriftDiT-Small": DriftDiT_Small,
+    "DriftDiT-Big": DriftDiT_Big,
+    "DriftDiT-Large": DriftDiT_Large,
+    "DriftDiT-XLarge": DriftDiT_XLarge,
 }

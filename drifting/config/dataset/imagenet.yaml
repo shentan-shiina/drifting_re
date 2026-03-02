@@ -6,11 +6,17 @@ use_latent: false
 
 img_size: 32 # img_size/8 if use latents
 in_channels: 3  # for latents space use 4, for pixel space use 3
+patch_size: 4
+num_register_tokens: 16
+
 num_classes: 200
 samples_per_class: 5
 batch_nc: 5
 batch_n_pos: 2
 batch_n_neg: 2
+
+uncond_neg_samples: 8
+uncond_neg_weight: 1.0
 
 temperatures: [0.02, 0.05, 0.2]
 lr: 0.0002
@@ -23,6 +29,17 @@ alpha_min: 1.0
 alpha_max: 3.0
 queue_size: 128
 label_dropout: 0.1
+
+
+mae:
+  epochs: 1000
+  lr: 0.001
+  weight_decay: 0.05
+  feature_dim: 512
+  base_width: 64
+  multi_scale: true
+  patch_size: 4
+  mask_ratio: 0.75
 
 
 

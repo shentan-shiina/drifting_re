@@ -18,12 +18,14 @@ latent_dir: ${data_root}/${dataset.name}/latents
 
 output_dir: /media/ubt/45d39189-c24c-4259-b12e-1d5d5e6071cc/outputs/
 
-run_name: run_3_MNIST_l16_mae_128
+run_name: run_2-${dataset.name}-${dataset.model}-L_${dataset.use_latent}-FE_${dataset.use_feature_encoder}-Img_${dataset.img_size}-BPos_${dataset.batch_n_pos}-UC_${dataset.uncond_neg_samples}
+
 resume_from_ckpt: true
 resume_dir: ${output_dir}/${dataset.name}/${run_name}/checkpoints
-mae_checkpoint_dir: ${output_dir}/${dataset.name}/${run_name}/mae_checkpoints
-resume_ckpt: last.ckpt
-resume_mae_ckpt: last.ckpt
+resume_ckpt: DriftDiT-Tiny-run_1-epoch=1229.ckpt
+
+mae_checkpoint_dir: ${output_dir}/${dataset.name}/run_3_MNIST_l16_mae_128/mae_checkpoints/
+resume_mae_ckpt: mae-epoch=017-mae_loss=0.0880.ckpt
 
 hydra:
   run:

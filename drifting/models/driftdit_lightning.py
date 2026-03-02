@@ -3,7 +3,7 @@ import torch
 from drifting.models.drift_dit import DriftDiT_models
 from drifting.models.feature_encoder import create_feature_encoder
 from drifting.utils.utils import SampleQueue, WarmupLRScheduler
-from drifting.utils.train_utils import sample_batch, compute_drifting_loss
+from drifting.utils.train_utils import sample_batch, sample_unconditional, compute_drifting_loss
 
 from drifting.utils.vae_utils import VAEManager
 
@@ -26,9 +26,11 @@ class DriftDiTModule(L.LightningModule):
         model_fn = DriftDiT_models[config["model"]]
         self.model = model_fn(
             img_size=config["img_size"],
+            patch_size=config.get("patch_size", 4),
             in_channels=config["in_channels"],
             num_classes=config["num_classes"],
             label_dropout=config["label_dropout"],
+            num_register_tokens=config.get("num_register_tokens", 8),
         )
         
         ########### Queue Init ###########
@@ -123,6 +125,14 @@ class DriftDiTModule(L.LightningModule):
         x_gen = self.model(noise, labels, alpha)
         x_pos, labels_pos = sample_batch(self.queue, num_classes, n_pos, self.device)
 
+        x_uncond_neg = None
+        if self.config.get("uncond_neg_samples", 0) > 0:
+            x_uncond_neg = sample_unconditional(
+                self.queue,
+                self.config["uncond_neg_samples"],
+                self.device,
+            )
+
         loss, info = compute_drifting_loss(
             x_gen,
             labels,
@@ -131,6 +141,8 @@ class DriftDiTModule(L.LightningModule):
             self.feature_encoder,
             temperatures,
             use_pixel_space=use_pixel,
+            x_uncond_neg=x_uncond_neg,
+            neg_weight=self.config.get("uncond_neg_weight", 1.0),
         )
 
         self.log("train_loss", loss, prog_bar=True)

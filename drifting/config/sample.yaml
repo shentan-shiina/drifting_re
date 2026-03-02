@@ -19,7 +19,7 @@ num_workers: 4
 
 hydra:
   run:
-    dir: ${output_dir}/${dataset.name}/${now:%Y%m%d_%H%M%S}
+    dir: ${output_dir}/${dataset.name}/sample_log/${run_name}
   output_subdir: null
   job:
     chdir: true

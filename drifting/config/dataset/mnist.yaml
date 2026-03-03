@@ -1,34 +1,34 @@
 name: mnist
-model: DriftDiT-Small
+model: DriftDiT-Tiny
 
 use_feature_encoder: false
-use_latent: true
-use_flip: true
+use_latent: false
+use_flip: false
 use_spatial_features: false
 precompute_drop_flip: true
 fid_drop_flip: true
 
-img_size: 128
+img_size: 32
 in_channels: 1
 patch_size: 4
 num_register_tokens: 16
 
 num_classes: 10
-samples_per_class: 8
+samples_per_class: 10
 batch_nc: 10
-batch_n_pos: 24
-batch_n_neg: 24
+batch_n_pos: 8
+batch_n_neg: 8
 
 uncond_neg_samples: 0
 uncond_neg_weight: 1.0
 
+epochs: 2000
 temperatures: [0.02, 0.05, 0.2]
 lr: 0.0002
 weight_decay: 0.01
 grad_clip: 2.0
 ema_decay: 0.999
 warmup_steps: 2000
-epochs: 2000
 alpha_min: 1.0
 alpha_max: 3.0
 queue_size: 128

@@ -1,34 +1,34 @@
 name: cifar10
 model: DriftDiT-Small
 
-use_feature_encoder: false
-use_latent: true
-use_spatial_features: true
+use_feature_encoder: true
+use_latent: false
+use_spatial_features: false
 
 precompute_drop_flip: true
 fid_drop_flip: true
 
-img_size: 128
-in_channels: 3  
+img_size: 32
+in_channels: 3
 patch_size: 2
 num_register_tokens: 16
 
 num_classes: 10
 samples_per_class: 5
 batch_nc: 10
-batch_n_pos: 64
-batch_n_neg: 64
+batch_n_pos: 8
+batch_n_neg: 8
 
-uncond_neg_samples: 8
+uncond_neg_samples: 0
 uncond_neg_weight: 1.0
 
+epochs: 100
+warmup_steps: 1000
 temperatures: [0.02, 0.05, 0.2]
 lr: 0.0002
 weight_decay: 0.01
 grad_clip: 2.0
 ema_decay: 0.999
-warmup_steps: 2000
-epochs: 200
 alpha_min: 1.0
 alpha_max: 3.0
 queue_size: 128

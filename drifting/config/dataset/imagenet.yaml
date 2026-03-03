@@ -1,24 +1,24 @@
 name: imagenet-tiny
 model: DriftDiT-Tiny
 
-use_feature_encoder: false
-use_latent: false
+use_feature_encoder: true
+use_latent: true
 use_spatial_features: true
 precompute_drop_flip: true
 fid_drop_flip: true
 
-img_size: 32 # img_size/8 if use latents
+img_size: 256
 in_channels: 3  # for latents space use 4, for pixel space use 3
 patch_size: 4
 num_register_tokens: 16
 
-num_classes: 200
-samples_per_class: 5
-batch_nc: 5
-batch_n_pos: 2
-batch_n_neg: 2
+num_classes: 1000
+samples_per_class: 100
+batch_nc: 64
+batch_n_pos: 64
+batch_n_neg: 64
 
-uncond_neg_samples: 8
+uncond_neg_samples: 16
 uncond_neg_weight: 1.0
 
 temperatures: [0.02, 0.05, 0.2]

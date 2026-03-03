@@ -13,7 +13,7 @@ samples:
   compute_fid: true
   fid_num_samples: 1000
   fid_batch_size: 64
-  fid_stats_path: ${data_root}/${dataset.name}/fid_stats/${dataset.name}_fid_stats.npz
+  fid_stats_path: ${fid_dir}/${dataset.name}_fid_stats.npz
 
 num_workers: 4
 

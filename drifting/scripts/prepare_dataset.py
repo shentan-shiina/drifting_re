@@ -12,6 +12,7 @@ from omegaconf import DictConfig, OmegaConf
 import hydra
 from diffusers.models import AutoencoderKL
 from torch.utils.data import DataLoader
+from torchvision import transforms
 
 from drifting.utils.data_utils import get_dataset
 
@@ -23,43 +24,52 @@ from drifting.utils.data_utils import get_dataset
 @torch.no_grad()
 def compute_latent_dataset(cfg: DictConfig, output_dir: Path, device: torch.device):
     """Encodes images to latents using VAE and saves them to disk."""
-    latent_dir = cfg.latent_dir
+    latent_dir = Path(cfg.latent_dir)
     latent_dir.mkdir(parents=True, exist_ok=True)
     
     ########### Load VAE ###########
     print(f"Loading VAE model: {cfg.vae_id}")
     vae = AutoencoderKL.from_pretrained(cfg.vae_id).to(device)
     vae.eval()
+    scaling_factor = float(getattr(vae.config, "scaling_factor", 1.0))
     
     ########### Load Dataset ###########
     dataset_cfg = OmegaConf.to_container(cfg.dataset, resolve=True)
     dataset, _ = get_dataset(dataset_cfg["name"], root=cfg.data_root, resize=dataset_cfg["img_size"])
+    # Drop stochastic augmentations so cached latents are deterministic
+    if dataset_cfg.get("precompute_drop_flip", True) and hasattr(dataset, "transform"):
+        transform = dataset.transform
+        if isinstance(transform, transforms.Compose):
+            transform = transforms.Compose([t for t in transform.transforms if not isinstance(t, transforms.RandomHorizontalFlip)])
+        dataset.transform = transform
     
     loader = DataLoader(
-        dataset, 
-        batch_size=cfg.batch_size, 
-        shuffle=False, 
+        dataset,
+        batch_size=cfg.batch_size,
+        shuffle=False,
         num_workers=cfg.num_workers,
-        pin_memory=True
+        pin_memory=True,
+        persistent_workers=cfg.num_workers > 0,
     )
     
     ########### Compute Latents ###########
     print(f"Encoding {len(dataset)} images to latents...")
     idx = 0
+    autocast_enabled = device.type == "cuda"
     for batch in tqdm(loader, desc="Encoding Latents"):
-        images, labels = batch[0].to(device), batch[1].to(device)
+        images, labels = batch[0].to(device, non_blocking=True), batch[1].to(device, non_blocking=True)
 
-        # FAKE RGB FOR MNIST
+        # Fake RGB for grayscale datasets so VAE sees 3 channels
         if images.shape[1] == 1:
             images = images.repeat(1, 3, 1, 1)
 
-        # Encode to latent distribution
-        latent_dist = vae.encode(images).latent_dist
-        
-        # Extract mean and std
-        mean = latent_dist.mean
-        std = latent_dist.std
-        
+        with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=autocast_enabled):
+            latent_dist = vae.encode(images).latent_dist
+
+        # Apply VAE scaling factor to match downstream usage (Latent Diffusion convention)
+        mean = latent_dist.mean * scaling_factor
+        std = latent_dist.std * scaling_factor
+
         # Concat along channel dim to shape (B, 8, H/8, W/8)
         cached_latents = torch.cat([mean, std], dim=1).cpu()
         labels = labels.cpu()
@@ -67,7 +77,7 @@ def compute_latent_dataset(cfg: DictConfig, output_dir: Path, device: torch.devi
         for i in range(images.size(0)):
             save_path = latent_dir / f"{idx:07d}.pt"
             torch.save({
-                "image": cached_latents[i], 
+                "image": cached_latents[i],
                 "label": labels[i]
             }, save_path)
             idx += 1
@@ -90,13 +100,21 @@ def compute_fid_stats(cfg: DictConfig, output_dir: Path, device: torch.device):
     
     ########### Load Dataset ###########
     dataset_cfg = OmegaConf.to_container(cfg.dataset, resolve=True)
-    dataset, _ = get_dataset(dataset_cfg["name"], root=cfg.data_root, resize=dataset_cfg["img_size"])
+    dataset, test_dataset = get_dataset(dataset_cfg["name"], root=cfg.data_root, resize=dataset_cfg["img_size"])
+    # Prefer deterministic (no-flip) pipeline for FID
+    fid_dataset = test_dataset if test_dataset is not None else dataset
+    if dataset_cfg.get("fid_drop_flip", True) and hasattr(fid_dataset, "transform"):
+        transform = fid_dataset.transform
+        if isinstance(transform, transforms.Compose):
+            transform = transforms.Compose([t for t in transform.transforms if not isinstance(t, transforms.RandomHorizontalFlip)])
+        fid_dataset.transform = transform
     
     loader = DataLoader(
-        dataset, 
-        batch_size=cfg.batch_size, 
-        shuffle=False, 
-        num_workers=cfg.num_workers
+        fid_dataset,
+        batch_size=cfg.batch_size,
+        shuffle=False,
+        num_workers=cfg.num_workers,
+        persistent_workers=cfg.num_workers > 0,
     )
 
     ########### Load InceptionV3 ###########

@@ -22,7 +22,7 @@ from drifting.utils.data_utils import get_dataset
 #######################################################
 
 @torch.no_grad()
-def compute_latent_dataset(cfg: DictConfig, output_dir: Path, device: torch.device):
+def compute_latent_dataset(cfg: DictConfig,  device: torch.device):
     """Encodes images to latents using VAE and saves them to disk."""
     latent_dir = Path(cfg.latent_dir)
     latent_dir.mkdir(parents=True, exist_ok=True)
@@ -90,13 +90,13 @@ def compute_latent_dataset(cfg: DictConfig, output_dir: Path, device: torch.devi
 #              (Precompute FID Scores)                #
 #######################################################
 @torch.no_grad()
-def compute_fid_stats(cfg: DictConfig, output_dir: Path, device: torch.device):
+def compute_fid_stats(cfg: DictConfig, device: torch.device):
     """Computes FID statistics (mu, sigma) of the real dataset."""
     from torchvision.models.inception import inception_v3, Inception_V3_Weights
     import torch.nn.functional as F
 
-    stats_dir = output_dir / "fid_stats"
-    stats_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = Path(cfg.fid_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     
     ########### Load Dataset ###########
     dataset_cfg = OmegaConf.to_container(cfg.dataset, resolve=True)
@@ -147,8 +147,8 @@ def compute_fid_stats(cfg: DictConfig, output_dir: Path, device: torch.device):
     sigma = np.cov(all_features, rowvar=False)
     
     ########### Save ###########
-    np.savez(stats_dir / f"{dataset_cfg['name']}_fid_stats.npz", mu=mu, sigma=sigma)
-    print(f"FID stats saved to {stats_dir}/{dataset_cfg['name']}_fid_stats.npz")
+    np.savez(output_dir / f"{dataset_cfg['name']}_fid_stats.npz", mu=mu, sigma=sigma)
+    print(f"FID stats saved to {output_dir}/{dataset_cfg['name']}_fid_stats.npz")
 
 @hydra.main(config_path="../config", config_name="precompute", version_base="1.3")
 def main(cfg: DictConfig):
@@ -158,10 +158,10 @@ def main(cfg: DictConfig):
     output_dir.mkdir(parents=True, exist_ok=True)
     
     if cfg.compute_latent:
-        compute_latent_dataset(cfg, output_dir, device)
+        compute_latent_dataset(cfg, device)
         
     if cfg.compute_fid:
-        compute_fid_stats(cfg, output_dir, device)
+        compute_fid_stats(cfg, device)
 
 if __name__ == "__main__":
     main()

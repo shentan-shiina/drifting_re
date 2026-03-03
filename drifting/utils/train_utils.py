@@ -72,15 +72,40 @@ def _normalize_feature_block(features: List[torch.Tensor]) -> List[torch.Tensor]
     return splits
 
 
-def _prepare_features(x: torch.Tensor, encoder: Optional[nn.Module], use_pixel_space: bool) -> List[torch.Tensor]:
-    """Return a list of pooled feature tensors."""
+def _prepare_features(
+    x: torch.Tensor,
+    encoder: Optional[nn.Module],
+    use_pixel_space: bool,
+    use_spatial_features: bool,
+) -> List[torch.Tensor]:
+    """Return a list of feature tensors; optionally keep spatial locations (Appendix A.5)."""
     if use_pixel_space or encoder is None:
-        return [x.flatten(start_dim=1).float()]
+        feats = x.flatten(start_dim=1).float()
+        return [feats]
 
     feat_out = encoder(x.float())
-    if isinstance(feat_out, torch.Tensor):
-        return [feat_out]
-    return [F.adaptive_avg_pool2d(f, 1).flatten(1) for f in feat_out]
+    feat_list = [feat_out] if isinstance(feat_out, torch.Tensor) else list(feat_out)
+
+    feats: List[torch.Tensor] = []
+    for f in feat_list:
+        if use_spatial_features:
+            # Keep spatial grids or token sequences intact; flatten happens later
+            if f.dim() in (3, 4):
+                feats.append(f)
+            elif f.dim() == 2:
+                feats.append(f)
+            else:
+                feats.append(f.view(f.shape[0], -1))
+        else:
+            if f.dim() == 4:
+                feats.append(F.adaptive_avg_pool2d(f, 1).flatten(1))
+            elif f.dim() == 3:
+                feats.append(f.mean(dim=1))
+            elif f.dim() == 2:
+                feats.append(f)
+            else:
+                feats.append(f.view(f.shape[0], -1))
+    return feats
 
 
 def compute_drifting_loss(
@@ -91,6 +116,7 @@ def compute_drifting_loss(
     feature_encoder: Optional[nn.Module],
     temperatures: list,
     use_pixel_space: bool = False,
+    use_spatial_features: bool = False,
     x_uncond_neg: Optional[torch.Tensor] = None,
     neg_weight: float = 1.0,
 ) -> Tuple[torch.Tensor, dict]:
@@ -98,10 +124,10 @@ def compute_drifting_loss(
     device = x_gen.device
     num_classes = labels_gen.max().item() + 1
 
-    feat_gen_list = _prepare_features(x_gen, feature_encoder, use_pixel_space)
+    feat_gen_list = _prepare_features(x_gen, feature_encoder, use_pixel_space, use_spatial_features)
     with torch.no_grad():
-        feat_pos_list = _prepare_features(x_pos, feature_encoder, use_pixel_space)
-        feat_uncond_list = _prepare_features(x_uncond_neg, feature_encoder, use_pixel_space) if x_uncond_neg is not None else None
+        feat_pos_list = _prepare_features(x_pos, feature_encoder, use_pixel_space, use_spatial_features)
+        feat_uncond_list = _prepare_features(x_uncond_neg, feature_encoder, use_pixel_space, use_spatial_features) if x_uncond_neg is not None else None
 
     total_loss = 0.0
     total_drift_norm = 0.0
@@ -120,17 +146,31 @@ def compute_drifting_loss(
             if feat_gen_c.numel() == 0 or feat_pos_c.numel() == 0:
                 continue
 
-            # Negatives are the conditional batch itself (Alg. 1)
-            feat_neg_c = feat_gen_c
+            # Flatten spatial locations to per-token features if applicable
+            def _flatten_tokens(feat: torch.Tensor) -> torch.Tensor:
+                if feat.dim() == 4:
+                    B, C, H, W = feat.shape
+                    return feat.permute(0, 2, 3, 1).reshape(B * H * W, C)
+                if feat.dim() == 3:
+                    B, N, C = feat.shape
+                    return feat.reshape(B * N, C)
+                return feat
+
+            feat_gen_tokens = _flatten_tokens(feat_gen_c)
+            feat_pos_tokens = _flatten_tokens(feat_pos_c)
+
+            # Negatives are the conditional batch itself (Alg. 1) plus optional unconditional
+            feat_neg_tokens = feat_gen_tokens
             if feat_uncond_list is not None and neg_weight > 0:
                 feat_uncond = feat_uncond_list[0] if len(feat_uncond_list) == 1 else torch.cat(feat_uncond_list, dim=0)
+                feat_uncond = _flatten_tokens(feat_uncond)
                 repeat = max(1, int(round(neg_weight)))
-                feat_neg_c = torch.cat([feat_neg_c, feat_uncond.repeat(repeat, 1)], dim=0)
+                feat_neg_tokens = torch.cat([feat_neg_tokens, feat_uncond.repeat(repeat, 1)], dim=0)
 
             norm_gen, norm_pos, norm_neg = _normalize_feature_block([
-                feat_gen_c,
-                feat_pos_c,
-                feat_neg_c,
+                feat_gen_tokens,
+                feat_pos_tokens,
+                feat_neg_tokens,
             ])
 
             # Drifting field (multi-temperature, already normalized per-temp)

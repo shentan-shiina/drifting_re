@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from drifting.models.drifting import compute_V, compute_V_multi_temperature
+from drifting.models.drifting import compute_V_multi_temperature
 from drifting.utils.utils import SampleQueue
 
 

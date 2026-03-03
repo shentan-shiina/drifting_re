@@ -92,7 +92,7 @@ class MAEPretrainModule(L.LightningModule):
         optimizer = torch.optim.AdamW(
             self.mae.parameters(), 
             lr=self.mae_config.get("lr", 1e-3), 
-            weight_decay=0.05
+            weight_decay=self.mae_config.get("weight_decay", 0.05)
         )
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=self.mae_config.get("epochs", 50)

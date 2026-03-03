@@ -84,7 +84,7 @@ def main(cfg: DictConfig):
         precision="bf16-mixed",
         gradient_clip_val=config["grad_clip"],
         log_every_n_steps=cfg.log_step_interval,
-        profiler="simple",
+        # profiler="simple",
     )
 
     # Start Training

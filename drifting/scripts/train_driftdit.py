@@ -39,18 +39,18 @@ def main(cfg: DictConfig):
         if config.get("img_size", 0) > 32:
             config["img_size"] = config.get("img_size", 256) // 8
         config["in_channels"] = 4
+        latent_dir = os.path.join(cfg.data_root, config["name"], "latents")
+        train_dataset = LatentDataset(root=latent_dir, use_flip=config.get("latent_flip", True))
+    else:
+        train_dataset, _ = get_dataset(config["name"], root=cfg.data_root, resize=config["img_size"])
 
+    if config.get("use_feature_encoder", False):
         mae_ckpt = cfg.get("resume_mae_ckpt", None)
         mae_dir = cfg.get("mae_checkpoint_dir", None)
         config["mae_checkpoint_path"] = os.path.join(mae_dir, mae_ckpt) if mae_dir and mae_ckpt else None
 
         if not config["mae_checkpoint_path"] or not os.path.exists(config["mae_checkpoint_path"]):
             raise FileNotFoundError(f"Failed to load MAE checkpoint at {config['mae_checkpoint_path']}. Run pretrain MAE first.")
-
-        latent_dir = os.path.join(cfg.data_root, config["name"], "latents")
-        train_dataset = LatentDataset(root=latent_dir, use_flip=config.get("latent_flip", True))
-    else:
-        train_dataset, _ = get_dataset(config["name"], root=cfg.data_root, resize=config["img_size"])
 
     train_loader = DataLoader(
         train_dataset, batch_size=cfg.batch_size, shuffle=True, 
@@ -84,6 +84,7 @@ def main(cfg: DictConfig):
         precision="bf16-mixed",
         gradient_clip_val=config["grad_clip"],
         log_every_n_steps=cfg.log_step_interval,
+        profiler="simple",
     )
 
     # Start Training

@@ -26,7 +26,7 @@ def main(cfg: DictConfig):
     
     wandb_logger = WandbLogger(
         project="drift-mae",
-        name=f"{config['model']}-{cfg.run_name}"
+        name=f"{config['model']}-{cfg.run_name}-FT_{config['mae']['finetune_classifier']}"
     )
     
     last_checkpoint_path = os.path.join(cfg.mae_checkpoint_dir, cfg.resume_mae_ckpt)
@@ -72,7 +72,7 @@ def main(cfg: DictConfig):
             dirpath="mae_checkpoints",
             every_n_epochs=cfg.save_interval,
             save_last=True,
-            filename="mae-{epoch:03d}-{mae_loss:.4f}",
+            filename=f"mae-{{epoch:03d}}-{{mae_loss:.4f}}-FT_{config['mae']['finetune_classifier']}",
             monitor="mae_loss",
             mode="min",
             save_top_k=3,
@@ -86,7 +86,7 @@ def main(cfg: DictConfig):
         max_epochs=config["epochs"],
         callbacks=callbacks,
         accelerator="auto",
-        precision="16-mixed",
+        precision="bf16-mixed",
         log_every_n_steps=cfg.log_interval,
         gradient_clip_val=cfg.get("grad_clip", 1.0),
     )

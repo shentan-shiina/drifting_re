@@ -2,7 +2,7 @@ import hydra
 import os
 from omegaconf import DictConfig, OmegaConf
 from lightning import Trainer, seed_everything
-from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from torch.utils.data import DataLoader
 from torch import set_float32_matmul_precision
 from drifting.models.driftdit_lightning import DriftDiTModule
@@ -71,7 +71,8 @@ def main(cfg: DictConfig):
             filename=f"{config['model']}-{cfg.run_name}-{{epoch:02d}}-{{step:02d}}-{{train_loss:0.3f}}"
         ),
         EMACallback(decay=config["ema_decay"]),
-        SamplingCallback(sample_interval=cfg.sample_interval, config=config)
+        SamplingCallback(sample_interval=cfg.sample_interval, config=config),
+        LearningRateMonitor(logging_interval='step')
     ]
 
     # Trainer Setup

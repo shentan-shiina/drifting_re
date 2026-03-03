@@ -51,6 +51,7 @@ class DriftDiTModule(L.LightningModule):
                 in_channels=config["in_channels"],
                 feature_dim=mae_config.get("feature_dim", 512),
                 multi_scale=mae_config.get("multi_scale", 512),
+                base_width=mae_config.get("base_width", 256),
                 use_pretrained=not has_mae_ckpt, # Disable default ResNet if using MAE
                 mae_checkpoint_path=config.get("mae_checkpoint_path", None)
             )
@@ -110,6 +111,7 @@ class DriftDiTModule(L.LightningModule):
         alpha_max = self.config["alpha_max"]
         temperatures = self.config["temperatures"]
         use_pixel = not self.config["use_feature_encoder"]
+        use_spatial = self.config.get("use_spatial_features", True)
         batch_size = num_classes * n_neg
 
         labels = torch.arange(num_classes, device=self.device).repeat_interleave(n_neg)
@@ -141,15 +143,26 @@ class DriftDiTModule(L.LightningModule):
             self.feature_encoder,
             temperatures,
             use_pixel_space=use_pixel,
+            use_spatial_features=use_spatial,
             x_uncond_neg=x_uncond_neg,
             neg_weight=self.config.get("uncond_neg_weight", 1.0),
         )
 
-        self.log("train_loss", loss, prog_bar=True)
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         if "drift_norm" in info:
-            self.log("drift_norm", info["drift_norm"], prog_bar=True)
+            self.log("drift_norm", info["drift_norm"], on_step=True, on_epoch=True, prog_bar=True, logger=True)
 
         return loss
+
+    def on_train_epoch_end(self):
+            """Print the epoch averages calculated by PyTorch Lightning."""
+            avg_loss = self.trainer.callback_metrics.get("train_loss_epoch")
+            avg_drift = self.trainer.callback_metrics.get("drift_norm_epoch")
+
+            if avg_loss is not None:
+                print(f"\nEpoch {self.current_epoch} Avg Train Loss:   {avg_loss.item():.4f}")
+                if avg_drift is not None:
+                    print(f"Epoch {self.current_epoch} Avg Drift Norm:   {avg_drift.item():.4f}")
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(

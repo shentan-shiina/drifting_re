@@ -3,9 +3,13 @@ model: DriftDiT-Small
 
 use_feature_encoder: false
 use_latent: true
+use_spatial_features: true
 
-img_size: 4 # img_size/8 if use latents
-in_channels: 4  # for latents space use 4, for pixel space use 3
+precompute_drop_flip: true
+fid_drop_flip: true
+
+img_size: 128
+in_channels: 3  
 patch_size: 2
 num_register_tokens: 16
 
@@ -39,5 +43,7 @@ mae:
   multi_scale: true
   patch_size: 4
   mask_ratio: 0.75
-
+  finetune_classifier: true
+  lambda_max: 0.1
+  lambda_warmup_steps: 1000
 

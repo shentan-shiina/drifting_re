@@ -18,7 +18,7 @@ class DriftDiTModule(L.LightningModule):
         self.config = config
         
         self.use_latent = config.get("use_latent", True)
-        mae_config = config.get("mae",None)
+        mae_config = config.get("mae", {})
         if self.use_latent:
             self.vae_manager = VAEManager(vae_id="stabilityai/sd-vae-ft-mse")
 
@@ -50,8 +50,11 @@ class DriftDiTModule(L.LightningModule):
                 dataset=config["name"],
                 in_channels=config["in_channels"],
                 feature_dim=mae_config.get("feature_dim", 512),
-                multi_scale=mae_config.get("multi_scale", 512),
+                multi_scale=mae_config.get("multi_scale", True),
                 base_width=mae_config.get("base_width", 256),
+                blocks_per_stage=mae_config.get("blocks_per_stage", [3, 4, 6, 3]),
+                input_patch_size=mae_config.get("mae_input_patch", 1),
+                output_mode="multiscale",
                 use_pretrained=not has_mae_ckpt, # Disable default ResNet if using MAE
                 mae_checkpoint_path=config.get("mae_checkpoint_path", None)
             )

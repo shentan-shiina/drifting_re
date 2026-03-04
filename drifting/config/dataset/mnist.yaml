@@ -8,7 +8,7 @@ use_spatial_features: false
 precompute_drop_flip: true
 fid_drop_flip: true
 
-img_size: 32
+img_size: 28
 in_channels: 1
 patch_size: 4
 num_register_tokens: 16
@@ -36,13 +36,17 @@ label_dropout: 0.1
 
 mae:
   epochs: 1000
+  finetune_steps: 3000
   lr: 0.001
+  finetune_lr: 0.001
   weight_decay: 0.05
   feature_dim: 512
   base_width: 64
+  blocks_per_stage: [3, 4, 6, 3]
   multi_scale: true
-  patch_size: 4
-  mask_ratio: 0.75
+  mae_input_patch: 1
+  mask_block_size: 2
+  mask_prob: 0.5
   finetune_classifier: true
   lambda_max: 0.1
   lambda_warmup_steps: 1000

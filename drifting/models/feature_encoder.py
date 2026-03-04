@@ -9,7 +9,7 @@ Phase 2: Use this encoder trained with MAE objective for better results
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Optional, List
+from typing import Optional, List, Sequence, Union
 import torchvision.models as models
 
 
@@ -111,20 +111,35 @@ class MultiScaleFeatureEncoder(nn.Module):
         self,
         in_channels: int = 3,
         base_width: int = 64,
-        blocks_per_stage: int = 2,
+        blocks_per_stage: Union[int, Sequence[int]] = 2,
         feature_dim: int = 512,
         multi_scale: bool = True,
+        input_patch_size: int = 1,
+        output_mode: str = "projected",
     ):
         """
         Args:
             in_channels: Number of input channels (1 for MNIST, 3 for CIFAR)
             base_width: Base number of channels (64 for MNIST, 128 for CIFAR)
-            blocks_per_stage: Number of residual blocks per stage
+            blocks_per_stage: Number of residual blocks per stage (int) or per-stage list [s1,s2,s3,s4]
             feature_dim: Output feature dimension
             multi_scale: Whether to use multi-scale features
+            input_patch_size: Optional space-to-depth patchification size before encoder
+            output_mode: "projected" or "multiscale"
         """
         super().__init__()
         self.multi_scale = multi_scale
+        self.output_mode = output_mode
+        self.input_patch_size = int(input_patch_size)
+
+        if isinstance(blocks_per_stage, int):
+            stage_depths = [blocks_per_stage] * 4
+        else:
+            stage_depths = list(blocks_per_stage)
+            if len(stage_depths) != 4:
+                raise ValueError("blocks_per_stage must be int or a sequence of length 4")
+
+        self.stage_depths = stage_depths
 
         # Initial conv
         self.stem = nn.Sequential(
@@ -134,16 +149,16 @@ class MultiScaleFeatureEncoder(nn.Module):
         )
 
         # Stage 1: 32x32 -> 32x32
-        self.stage1 = self._make_stage(base_width, base_width, blocks_per_stage, stride=1)
+        self.stage1 = self._make_stage(base_width, base_width, stage_depths[0], stride=1)
 
         # Stage 2: 32x32 -> 16x16
-        self.stage2 = self._make_stage(base_width, base_width * 2, blocks_per_stage, stride=2)
+        self.stage2 = self._make_stage(base_width, base_width * 2, stage_depths[1], stride=2)
 
         # Stage 3: 16x16 -> 8x8
-        self.stage3 = self._make_stage(base_width * 2, base_width * 4, blocks_per_stage, stride=2)
+        self.stage3 = self._make_stage(base_width * 2, base_width * 4, stage_depths[2], stride=2)
 
         # Stage 4: 8x8 -> 4x4
-        self.stage4 = self._make_stage(base_width * 4, base_width * 8, blocks_per_stage, stride=2)
+        self.stage4 = self._make_stage(base_width * 4, base_width * 8, stage_depths[3], stride=2)
 
         # Feature projection
         if multi_scale:
@@ -152,6 +167,41 @@ class MultiScaleFeatureEncoder(nn.Module):
             total_channels = base_width * 8
 
         self.proj = nn.Linear(total_channels, feature_dim)
+
+    def _space_to_depth(self, x: torch.Tensor) -> torch.Tensor:
+        p = self.input_patch_size
+        if p <= 1:
+            return x
+        B, C, H, W = x.shape
+        if H % p != 0 or W % p != 0:
+            raise ValueError(f"Input size ({H}, {W}) must be divisible by input_patch_size={p}")
+        x = x.reshape(B, C, H // p, p, W // p, p)
+        x = x.permute(0, 1, 3, 5, 2, 4).reshape(B, C * p * p, H // p, W // p)
+        return x
+
+    def extract_multiscale(self, x: torch.Tensor) -> List[torch.Tensor]:
+        x = self._space_to_depth(x)
+        x = self.stem(x)
+        f1 = self.stage1(x)
+        f2 = self.stage2(f1)
+        f3 = self.stage3(f2)
+        f4 = self.stage4(f3)
+        return [f1, f2, f3, f4]
+
+    def project_from_multiscale(self, features: List[torch.Tensor]) -> torch.Tensor:
+        f1, f2, f3, f4 = features
+        if self.multi_scale:
+            p1 = F.adaptive_avg_pool2d(f1, 1).flatten(1)
+            p2 = F.adaptive_avg_pool2d(f2, 1).flatten(1)
+            p3 = F.adaptive_avg_pool2d(f3, 1).flatten(1)
+            p4 = F.adaptive_avg_pool2d(f4, 1).flatten(1)
+            pooled = torch.cat([p1, p2, p3, p4], dim=1)
+        else:
+            pooled = F.adaptive_avg_pool2d(f4, 1).flatten(1)
+        return self.proj(pooled)
+
+    def forward_projected(self, x: torch.Tensor) -> torch.Tensor:
+        return self.project_from_multiscale(self.extract_multiscale(x))
 
     def _make_stage(
         self,
@@ -176,30 +226,31 @@ class MultiScaleFeatureEncoder(nn.Module):
         Returns:
             Features, shape (B, feature_dim)
         """
-        x = self.stem(x)
+        features = self.extract_multiscale(x)
+        if self.output_mode == "multiscale":
+            return features
+        return self.project_from_multiscale(features)
 
-        # Extract multi-scale features
-        f1 = self.stage1(x)
-        f2 = self.stage2(f1)
-        f3 = self.stage3(f2)
-        f4 = self.stage4(f3)
 
-        if self.multi_scale:
-            # Global average pooling at each scale
-            p1 = F.adaptive_avg_pool2d(f1, 1).flatten(1)
-            p2 = F.adaptive_avg_pool2d(f2, 1).flatten(1)
-            p3 = F.adaptive_avg_pool2d(f3, 1).flatten(1)
-            p4 = F.adaptive_avg_pool2d(f4, 1).flatten(1)
+class MAEUpBlock(nn.Module):
+    def __init__(self, in_channels: int, skip_channels: int, out_channels: int, upsample: bool = True):
+        super().__init__()
+        self.upsample = upsample
+        self.norm = nn.GroupNorm(min(32, in_channels + skip_channels), in_channels + skip_channels)
+        self.conv1 = nn.Conv2d(in_channels + skip_channels, out_channels, kernel_size=3, padding=1, bias=False)
+        self.gn1 = nn.GroupNorm(min(32, out_channels), out_channels)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False)
+        self.gn2 = nn.GroupNorm(min(32, out_channels), out_channels)
 
-            # Concatenate multi-scale features
-            features = torch.cat([p1, p2, p3, p4], dim=1)
-        else:
-            features = F.adaptive_avg_pool2d(f4, 1).flatten(1)
-
-        # Project to output dimension
-        features = self.proj(features)
-
-        return features
+    def forward(self, x: torch.Tensor, skip: Optional[torch.Tensor] = None) -> torch.Tensor:
+        if self.upsample:
+            x = F.interpolate(x, scale_factor=2, mode="bilinear", align_corners=False)
+        if skip is not None:
+            x = torch.cat([x, skip], dim=1)
+        x = self.norm(x)
+        x = F.gelu(self.gn1(self.conv1(x)))
+        x = F.gelu(self.gn2(self.conv2(x)))
+        return x
 
 
 class MAEEncoder(nn.Module):
@@ -214,88 +265,82 @@ class MAEEncoder(nn.Module):
         feature_encoder: MultiScaleFeatureEncoder,
         in_channels: int = 3,
         img_size: int = 32,
-        patch_size: int = 4,
-        mask_ratio: float = 0.75,
+        input_patch_size: int = 1,
+        mask_block_size: int = 2,
+        mask_prob: float = 0.5,
     ):
         """
         Args:
             feature_encoder: The feature encoder to pre-train
             in_channels: Number of input channels
             img_size: Input image size
-            patch_size: Patch size for masking
-            mask_ratio: Ratio of patches to mask
+            input_patch_size: Optional patchify input by space-to-depth before encoder
+            mask_block_size: Spatial block size for zero masking (Appendix A.3 uses 2)
+            mask_prob: Independent mask probability per block (Appendix A.3 uses 0.5)
         """
         super().__init__()
         self.encoder = feature_encoder
         self.in_channels = in_channels
         self.img_size = img_size
-        self.patch_size = patch_size
-        self.mask_ratio = mask_ratio
-        self.num_patches = (img_size // patch_size) ** 2
+        self.input_patch_size = int(input_patch_size)
+        self.mask_block_size = int(mask_block_size)
+        self.mask_prob = float(mask_prob)
 
-        # Decoder for reconstruction
-        self.decoder = nn.Sequential(
-            nn.Linear(feature_encoder.proj.out_features, 256),
+        base_width = self.encoder.stem[0].out_channels
+        self.pre_decode = nn.Sequential(
+            nn.Conv2d(base_width * 8, base_width * 8, kernel_size=3, padding=1, bias=False),
+            nn.GroupNorm(min(32, base_width * 8), base_width * 8),
             nn.GELU(),
-            nn.Linear(256, 512),
-            nn.GELU(),
-            nn.Linear(512, self.num_patches * patch_size * patch_size * in_channels),
         )
+        self.up1 = MAEUpBlock(base_width * 8, base_width * 4, base_width * 4, upsample=True)
+        self.up2 = MAEUpBlock(base_width * 4, base_width * 2, base_width * 2, upsample=True)
+        self.up3 = MAEUpBlock(base_width * 2, base_width, base_width, upsample=True)
+        self.up4 = MAEUpBlock(base_width, 0, base_width, upsample=False)
 
-    def patchify(self, x: torch.Tensor) -> torch.Tensor:
-        """Convert image to patches."""
+        decoder_channels = in_channels * (self.input_patch_size ** 2)
+        self.out_conv = nn.Conv2d(base_width, decoder_channels, kernel_size=1)
+
+    def _space_to_depth(self, x: torch.Tensor, patch_size: int) -> torch.Tensor:
+        if patch_size <= 1:
+            return x
         B, C, H, W = x.shape
-        p = self.patch_size
-        h, w = H // p, W // p
-        x = x.reshape(B, C, h, p, w, p)
-        x = x.permute(0, 2, 4, 1, 3, 5)  # (B, h, w, C, p, p)
-        x = x.reshape(B, h * w, C * p * p)
+        if H % patch_size != 0 or W % patch_size != 0:
+            raise ValueError(f"Input size ({H}, {W}) must be divisible by patch_size={patch_size}")
+        x = x.reshape(B, C, H // patch_size, patch_size, W // patch_size, patch_size)
+        x = x.permute(0, 1, 3, 5, 2, 4).reshape(B, C * patch_size * patch_size, H // patch_size, W // patch_size)
         return x
 
-    def unpatchify(self, x: torch.Tensor) -> torch.Tensor:
-        """Convert patches back to image."""
-        B, N, D = x.shape
-        p = self.patch_size
-        h = w = int(N ** 0.5)
-        C = self.in_channels
-        x = x.reshape(B, h, w, C, p, p)
-        x = x.permute(0, 3, 1, 4, 2, 5)  # (B, C, h, p, w, p)
-        x = x.reshape(B, C, h * p, w * p)
+    def _depth_to_space(self, x: torch.Tensor, patch_size: int) -> torch.Tensor:
+        if patch_size <= 1:
+            return x
+        B, C, H, W = x.shape
+        if C % (patch_size * patch_size) != 0:
+            raise ValueError("Channel dimension is not divisible by patch_size^2 for unpatchify")
+        out_c = C // (patch_size * patch_size)
+        x = x.reshape(B, out_c, patch_size, patch_size, H, W)
+        x = x.permute(0, 1, 4, 2, 5, 3).reshape(B, out_c, H * patch_size, W * patch_size)
         return x
 
     def random_masking(self, x: torch.Tensor) -> tuple:
         """
-        Apply random masking to patches.
+        Apply random 2x2-style masking by zeroing spatial blocks.
 
         Returns:
             x_masked: Masked image
-            mask: Binary mask (1 = masked, 0 = visible)
-            ids_restore: Indices to restore original order
+            mask: Binary mask at feature-map resolution (1 = masked, 0 = visible)
         """
         B, C, H, W = x.shape
-        p = self.patch_size
-        h, w = H // p, W // p
-        N = h * w
+        p = self.mask_block_size
+        if H % p != 0 or W % p != 0:
+            raise ValueError(f"Feature map size ({H}, {W}) must be divisible by mask_block_size={p}")
 
-        # Number of patches to mask
-        num_mask = int(N * self.mask_ratio)
+        mask_blocks = (torch.rand(B, H // p, W // p, device=x.device) < self.mask_prob).float()
+        mask = mask_blocks.repeat_interleave(p, dim=1).repeat_interleave(p, dim=2)
+        mask = mask[:, :H, :W]
+        mask = mask.unsqueeze(1)
 
-        # Random permutation
-        noise = torch.rand(B, N, device=x.device)
-        ids_shuffle = torch.argsort(noise, dim=1)
-        ids_restore = torch.argsort(ids_shuffle, dim=1)
-
-        # Create mask: 1 = masked, 0 = visible
-        mask = torch.ones(B, N, device=x.device)
-        mask[:, :N - num_mask] = 0
-        mask = torch.gather(mask, dim=1, index=ids_restore)
-
-        # Mask the image (set masked patches to 0)
-        mask_2d = mask.reshape(B, h, w, 1, 1).expand(-1, -1, -1, p, p)
-        mask_2d = mask_2d.permute(0, 3, 1, 4, 2).reshape(B, 1, H, W)
-        x_masked = x * (1 - mask_2d)
-
-        return x_masked, mask, ids_restore
+        x_masked = x * (1 - mask)
+        return x_masked, mask
 
     def forward(self, x: torch.Tensor) -> tuple:
         """
@@ -309,26 +354,22 @@ class MAEEncoder(nn.Module):
             pred: Reconstructed image
             mask: Binary mask
         """
-        # Apply masking
-        x_masked, mask, ids_restore = self.random_masking(x)
+        x_work = self._space_to_depth(x, self.input_patch_size)
+        x_masked, mask = self.random_masking(x_work)
 
-        # Encode
-        features = self.encoder(x_masked)
+        f1, f2, f3, f4 = self.encoder.extract_multiscale(x_masked)
+        z = self.pre_decode(f4)
+        z = self.up1(z, f3)
+        z = self.up2(z, f2)
+        z = self.up3(z, f1)
+        z = self.up4(z, None)
+        pred_work = self.out_conv(z)
 
-        # Decode
-        pred_patches = self.decoder(features)
-        pred_patches = pred_patches.reshape(x.shape[0], self.num_patches, -1)
+        err = (pred_work - x_work) ** 2
+        denom = (mask.sum() * x_work.shape[1]).clamp_min(1.0)
+        loss = (err * mask).sum() / denom
 
-        # Get target patches
-        target_patches = self.patchify(x)
-
-        # Loss on masked patches only
-        loss = (pred_patches - target_patches) ** 2
-        loss = loss.mean(dim=-1)  # (B, N)
-        loss = (loss * mask).sum() / mask.sum()
-
-        # Reconstruct image for visualization
-        pred = self.unpatchify(pred_patches)
+        pred = self._depth_to_space(pred_work, self.input_patch_size)
 
         return loss, pred, mask
 
@@ -337,7 +378,10 @@ def create_feature_encoder(
     in_channels: int = 3, # <-- Added to handle latent dimensions!
     feature_dim: int = 512,
     base_width: int = 128,
+    blocks_per_stage: Union[int, Sequence[int]] = 2,
     multi_scale: bool = True,
+    input_patch_size: int = 1,
+    output_mode: str = "multiscale",
     use_pretrained: bool = True,
     mae_checkpoint_path: Optional[str] = None, # <-- Added custom checkpoint path
 ):
@@ -349,9 +393,11 @@ def create_feature_encoder(
         encoder = MultiScaleFeatureEncoder(
             in_channels=in_channels,
             base_width=base_width,
-            blocks_per_stage=2,
+            blocks_per_stage=blocks_per_stage,
             feature_dim=feature_dim,
             multi_scale=multi_scale,
+            input_patch_size=input_patch_size,
+            output_mode=output_mode,
         )
         
         # Extract purely the encoder weights from the Lightning MAE checkpoint
@@ -369,16 +415,20 @@ def create_feature_encoder(
 
     if dataset.lower() == "mnist":
         return MultiScaleFeatureEncoder(
-            in_channels=1, base_width=64, blocks_per_stage=2,
+            in_channels=1, base_width=64, blocks_per_stage=blocks_per_stage,
             feature_dim=feature_dim, multi_scale=multi_scale,
+            input_patch_size=input_patch_size,
+            output_mode=output_mode,
         )
-    elif dataset.lower() in ["cifar10", "cifar", "imagenet"]:
+    elif dataset.lower() in ["cifar10", "cifar", "imagenet", "imagenet-tiny", "tiny-imagenet", "tiny_imagenet"]:
         if use_pretrained:
             return PretrainedResNetEncoder(pretrained=True)
         else:
             return MultiScaleFeatureEncoder(
-                in_channels=in_channels, base_width=128, blocks_per_stage=2,
+                in_channels=in_channels, base_width=128, blocks_per_stage=blocks_per_stage,
                 feature_dim=feature_dim, multi_scale=multi_scale,
+                input_patch_size=input_patch_size,
+                output_mode=output_mode,
             )
     else:
         raise ValueError(f"Unknown dataset: {dataset}")
@@ -410,8 +460,9 @@ def pretrain_mae(
         feature_encoder,
         in_channels=in_channels,
         img_size=32,
-        patch_size=4,
-        mask_ratio=0.75,
+        input_patch_size=1,
+        mask_block_size=2,
+        mask_prob=0.5,
     ).to(device)
 
     optimizer = torch.optim.AdamW(mae.parameters(), lr=lr, weight_decay=0.05)

@@ -42,27 +42,29 @@ def sample_unconditional(queue: SampleQueue, n: int, device: torch.device) -> to
     return torch.cat(samples, dim=0)
 
 def _normalize_feature_block(features: List[torch.Tensor]) -> List[torch.Tensor]:
-    """Shared feature normalization so distances are scale-free (Sec. A.6)."""
-    concat = torch.cat(features, dim=0)
-    # Stop-grad on normalization statistics to mimic paper's sg on Sj
-    mean = concat.mean(dim=0, keepdim=True).detach()
-    std = concat.std(dim=0, keepdim=True).clamp_min(1e-6).detach()
-    feat_std = (concat - mean) / std
+    """Appendix A.6 feature normalization with one scalar scale per feature map.
 
-    # Scale so avg pairwise distance ~= sqrt(D)
+    For spatial feature maps, tokens from all locations are already concatenated
+    before this function is called. We compute one shared scale across those
+    locations ("Normalization across spatial locations" in A.6).
+    """
+    concat = torch.cat(features, dim=0)
+
+    # A.6: one scalar Sj chosen so E||phi(x)-phi(y)|| ~= sqrt(Cj)
+    # with stop-grad on the scale statistic.
     with torch.no_grad():
-        n = min(feat_std.shape[0], 256)
-        idx = torch.randperm(feat_std.shape[0], device=feat_std.device)[:n]
-        subset = feat_std[idx]
+        n = min(concat.shape[0], 256)
+        idx = torch.randperm(concat.shape[0], device=concat.device)[:n]
+        subset = concat[idx]
         if n > 1:
             dists = torch.cdist(subset, subset, p=2)
-            mask = ~torch.eye(n, dtype=torch.bool, device=feat_std.device)
+            mask = ~torch.eye(n, dtype=torch.bool, device=concat.device)
             avg_dist = dists[mask].mean()
-            scale = (feat_std.shape[1] ** 0.5) / (avg_dist + 1e-8)
+            scale = (concat.shape[1] ** 0.5) / (avg_dist + 1e-8)
         else:
             scale = 1.0
 
-    feat_norm = feat_std * scale
+    feat_norm = concat * scale
     splits = []
     start = 0
     for f in features:
@@ -140,7 +142,7 @@ def compute_drifting_loss(
         if not mask_gen.any() or not mask_pos.any():
             continue
 
-        for feat_gen, feat_pos in zip(feat_gen_list, feat_pos_list):
+        for feat_idx, (feat_gen, feat_pos) in enumerate(zip(feat_gen_list, feat_pos_list)):
             feat_gen_c = feat_gen[mask_gen]
             feat_pos_c = feat_pos[mask_pos]
             if feat_gen_c.numel() == 0 or feat_pos_c.numel() == 0:
@@ -162,7 +164,9 @@ def compute_drifting_loss(
             # Negatives are the conditional batch itself (Alg. 1) plus optional unconditional
             feat_neg_tokens = feat_gen_tokens
             if feat_uncond_list is not None and neg_weight > 0:
-                feat_uncond = feat_uncond_list[0] if len(feat_uncond_list) == 1 else torch.cat(feat_uncond_list, dim=0)
+                if feat_idx >= len(feat_uncond_list):
+                    continue
+                feat_uncond = feat_uncond_list[feat_idx]
                 feat_uncond = _flatten_tokens(feat_uncond)
                 repeat = max(1, int(round(neg_weight)))
                 feat_neg_tokens = torch.cat([feat_neg_tokens, feat_uncond.repeat(repeat, 1)], dim=0)
@@ -185,6 +189,7 @@ def compute_drifting_loss(
                 temps_scaled,
                 mask_self=True,
                 normalize_each=True,
+                self_mask_count=norm_gen.shape[0],
             ).float()
 
             target = (norm_gen + V_total).detach()

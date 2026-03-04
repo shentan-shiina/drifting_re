@@ -14,6 +14,7 @@ def compute_V(
     y_neg: torch.Tensor,
     temperature: float,
     mask_self: bool = True,
+    self_mask_count: Optional[int] = None,
 ) -> torch.Tensor:
     """
     Compute the drifting field V (Algorithm 2 from paper, Page 12).
@@ -25,7 +26,9 @@ def compute_V(
         y_pos: Positive (real data) samples, shape (N_pos, D)
         y_neg: Negative (generated) samples, shape (N_neg, D)
         temperature: Temperature for softmax (smaller = sharper)
-        mask_self: Whether to mask self-distances (when y_neg == x)
+        mask_self: Whether to mask self-distances (when y_neg contains x)
+        self_mask_count: Number of leading negative samples corresponding to x.
+            If None, defaults to min(N, N_neg).
 
     Returns:
         V: Drifting field, shape (N, D)
@@ -44,10 +47,12 @@ def compute_V(
     dist_pos = torch.cdist(x_f, y_pos_f, p=2)  # (N, N_pos)
     dist_neg = torch.cdist(x_f, y_neg_f, p=2)  # (N, N_neg)
 
-    # 2. Mask self-distances (when y_neg contains x)
-    if mask_self and N == N_neg:
-        mask = torch.eye(N, device=device) * 1e6
-        dist_neg = dist_neg + mask
+    # 2. Mask self-distances (when y_neg contains x in leading rows)
+    if mask_self and N > 0 and N_neg > 0:
+        count = min(N, N_neg) if self_mask_count is None else max(0, min(int(self_mask_count), N, N_neg))
+        if count > 0:
+            mask = torch.eye(count, device=device, dtype=dist_neg.dtype) * 1e6
+            dist_neg[:count, :count] = dist_neg[:count, :count] + mask
 
     # 3. Compute logits
     logit_pos = -dist_pos / temperature  # (N, N_pos)
@@ -85,6 +90,7 @@ def compute_V_multi_temperature(
     temperatures: List[float] = [0.02, 0.05, 0.2],
     mask_self: bool = True,
     normalize_each: bool = True,
+    self_mask_count: Optional[int] = None,
 ) -> torch.Tensor:
     """
     Compute drifting field with multiple temperatures (Sec A.6).
@@ -99,6 +105,7 @@ def compute_V_multi_temperature(
         temperatures: List of temperature values
         mask_self: Whether to mask self-distances
         normalize_each: Whether to normalize each V before summing
+        self_mask_count: Number of leading negative samples corresponding to x
 
     Returns:
         V: Combined drifting field, shape (N, D)
@@ -106,7 +113,14 @@ def compute_V_multi_temperature(
     V_total = torch.zeros_like(x, dtype=torch.float32)
 
     for tau in temperatures:
-        V_tau = compute_V(x, y_pos, y_neg, tau, mask_self)
+        V_tau = compute_V(
+            x,
+            y_pos,
+            y_neg,
+            tau,
+            mask_self,
+            self_mask_count=self_mask_count,
+        )
 
         if normalize_each:
             # Normalize so E[||V||^2] ~ 1
@@ -121,34 +135,23 @@ def compute_V_multi_temperature(
 def normalize_features(
     features: torch.Tensor,
     scale: Optional[float] = None,
-    mean: Optional[torch.Tensor] = None,
-    std: Optional[torch.Tensor] = None,
     target_scale: Optional[float] = None,
-) -> Tuple[torch.Tensor, float, torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, float]:
     """
-    Normalize features by standardizing to zero mean and unit variance per dimension,
-    then scaling so average pairwise distance ~ sqrt(D) (Sec A.6).
+    Appendix A.6 scalar feature normalization.
+
+    Uses a single scale per feature block so average pairwise distance
+    is approximately sqrt(D), with stop-grad statistics.
 
     Args:
         features: Feature tensor, shape (N, D)
         scale: If provided, use this scale factor directly (for consistency across batches).
-        mean: If provided, use this mean for standardization.
-        std: If provided, use this std for standardization.
 
     Returns:
-        Normalized features, scale factor, mean, and std used
+        Normalized features and scale factor used
     """
     D = features.shape[1]
     target_dist = D ** 0.5  # ~32 for 1024 dims
-
-    # Compute or use provided mean/std
-    with torch.no_grad():
-        if mean is None:
-            mean = features.mean(dim=0, keepdim=True)
-        if std is None:
-            std = features.std(dim=0, keepdim=True) + 1e-8
-
-    features_std = (features - mean) / std
 
     if scale is None:
         if target_scale is not None:
@@ -159,7 +162,7 @@ def normalize_features(
                 # Sample subset for efficiency
                 n_sample = min(features.shape[0], 256)
                 idx = torch.randperm(features.shape[0], device=features.device)[:n_sample]
-                subset = features_std[idx]
+                subset = features[idx]
 
                 dists = torch.cdist(subset, subset, p=2)
                 # Exclude diagonal
@@ -169,7 +172,7 @@ def normalize_features(
                 # Scale to target distance
                 scale = (target_dist / (avg_dist + 1e-8)).item()
 
-    return features_std * scale, scale, mean, std
+    return features * scale, scale
 
 
 def normalize_drift(
@@ -265,8 +268,8 @@ class DriftingLoss(nn.Module):
         # Normalize features
         if self.do_normalize_features:
             feat_gen, scale_gen = normalize_features(feat_gen)
-            feat_pos, _ = normalize_features(feat_pos, target_scale=scale_gen * feat_gen.shape[1] ** 0.5)
-            feat_neg, _ = normalize_features(feat_neg, target_scale=scale_gen * feat_neg.shape[1] ** 0.5)
+            feat_pos, _ = normalize_features(feat_pos, scale=scale_gen)
+            feat_neg, _ = normalize_features(feat_neg, scale=scale_gen)
 
         # Compute drifting field
         V = compute_V_multi_temperature(

@@ -30,6 +30,26 @@ def sample_batch(queue: SampleQueue, num_classes: int, n_pos: int, device: torch
     return x_pos, labels
 
 
+def sample_batch_for_classes(
+    queue: SampleQueue,
+    class_labels: torch.Tensor,
+    n_pos: int,
+    device: torch.device,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Sample positives for an explicit class list (Nc classes)."""
+    x_pos_list = []
+    labels_list = []
+    for c in class_labels:
+        cls = int(c.item())
+        x_c = queue.sample(cls, n_pos, device)
+        x_pos_list.append(x_c)
+        labels_list.append(torch.full((n_pos,), cls, device=device, dtype=torch.long))
+
+    x_pos = torch.cat(x_pos_list, dim=0)
+    labels = torch.cat(labels_list, dim=0)
+    return x_pos, labels
+
+
 def sample_unconditional(queue: SampleQueue, n: int, device: torch.device) -> torch.Tensor:
     """Sample unconditional negatives uniformly across classes from the queue."""
     samples = []
@@ -85,15 +105,47 @@ def _prepare_features(
         feats = x.flatten(start_dim=1).float()
         return [feats]
 
+    def _feature_from_map(f: torch.Tensor) -> List[torch.Tensor]:
+        """Appendix A.5 feature sets from one feature map (B, C, H, W)."""
+        B, C, H, W = f.shape
+        out: List[torch.Tensor] = []
+
+        # (a) one vector per location
+        out.append(f.permute(0, 2, 3, 1).reshape(B, H * W, C))
+
+        # (b) one global mean/std vector
+        flat = f.flatten(2)  # (B, C, HW)
+        out.append(flat.mean(dim=2))
+        out.append(flat.std(dim=2, unbiased=False).clamp_min(1e-6))
+
+        # (c,d) pooled 2x2 / 4x4 patch stats (mean/std)
+        for k in (2, 4):
+            if H >= k and W >= k and H % k == 0 and W % k == 0:
+                mu = F.avg_pool2d(f, kernel_size=k, stride=k)
+                sq = F.avg_pool2d(f * f, kernel_size=k, stride=k)
+                sigma = (sq - mu * mu).clamp_min(1e-6).sqrt()
+                out.append(mu.permute(0, 2, 3, 1).reshape(B, -1, C))
+                out.append(sigma.permute(0, 2, 3, 1).reshape(B, -1, C))
+        return out
+
     feat_out = encoder(x.float())
     feat_list = [feat_out] if isinstance(feat_out, torch.Tensor) else list(feat_out)
 
     feats: List[torch.Tensor] = []
+    # A.5: add vanilla drifting feature (no phi)
+    feats.append(x.flatten(start_dim=1).float())
+    # A.5: add x^2 channel-stat feature from encoder input
+    feats.append((x.float() ** 2).mean(dim=(2, 3)))
+
     for f in feat_list:
         if use_spatial_features:
-            # Keep spatial grids or token sequences intact; flatten happens later
-            if f.dim() in (3, 4):
+            if f.dim() == 4:
+                feats.extend(_feature_from_map(f))
+            # Token sequences fallback: keep tokens + global stats
+            elif f.dim() == 3:
                 feats.append(f)
+                feats.append(f.mean(dim=1))
+                feats.append(f.std(dim=1, unbiased=False).clamp_min(1e-6))
             elif f.dim() == 2:
                 feats.append(f)
             else:
@@ -131,7 +183,7 @@ def compute_drifting_loss(
         feat_pos_list = _prepare_features(x_pos, feature_encoder, use_pixel_space, use_spatial_features)
         feat_uncond_list = _prepare_features(x_uncond_neg, feature_encoder, use_pixel_space, use_spatial_features) if x_uncond_neg is not None else None
 
-    total_loss = 0.0
+    total_loss = torch.tensor(0.0, device=device)
     total_drift_norm = 0.0
     num_losses = 0
 
@@ -163,13 +215,17 @@ def compute_drifting_loss(
 
             # Negatives are the conditional batch itself (Alg. 1) plus optional unconditional
             feat_neg_tokens = feat_gen_tokens
+            neg_weights = torch.ones(feat_gen_tokens.shape[0], device=device, dtype=feat_gen_tokens.dtype)
             if feat_uncond_list is not None and neg_weight > 0:
                 if feat_idx >= len(feat_uncond_list):
                     continue
                 feat_uncond = feat_uncond_list[feat_idx]
                 feat_uncond = _flatten_tokens(feat_uncond)
-                repeat = max(1, int(round(neg_weight)))
-                feat_neg_tokens = torch.cat([feat_neg_tokens, feat_uncond.repeat(repeat, 1)], dim=0)
+                feat_neg_tokens = torch.cat([feat_neg_tokens, feat_uncond], dim=0)
+                neg_weights = torch.cat([
+                    neg_weights,
+                    torch.full((feat_uncond.shape[0],), float(neg_weight), device=device, dtype=feat_gen_tokens.dtype),
+                ], dim=0)
 
             norm_gen, norm_pos, norm_neg = _normalize_feature_block([
                 feat_gen_tokens,
@@ -190,14 +246,16 @@ def compute_drifting_loss(
                 mask_self=True,
                 normalize_each=True,
                 self_mask_count=norm_gen.shape[0],
+                neg_weights=neg_weights,
             ).float()
 
             target = (norm_gen + V_total).detach()
             loss_c = F.mse_loss(norm_gen, target)
 
-            total_loss = total_loss + loss_c * norm_gen.shape[0]
-            total_drift_norm += torch.mean(V_total ** 2).item() ** 0.5 * norm_gen.shape[0]
-            num_losses += norm_gen.shape[0]
+            # A.5: one loss term per feature, summed then averaged across terms
+            total_loss = total_loss + loss_c
+            total_drift_norm += torch.mean(V_total ** 2).item() ** 0.5
+            num_losses += 1
 
     if num_losses == 0:
         return torch.tensor(0.0, device=device, requires_grad=True), {"loss": 0.0, "drift_norm": 0.0}

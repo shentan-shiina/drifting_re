@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, List, Sequence, Union
 import torchvision.models as models
-
+from termcolor import cprint
 
 class PretrainedResNetEncoder(nn.Module):
     """
@@ -167,6 +167,15 @@ class MultiScaleFeatureEncoder(nn.Module):
             total_channels = base_width * 8
 
         self.proj = nn.Linear(total_channels, feature_dim)
+
+        cprint(f"[Feature Encoder Module] Initialized with parameters:", "yellow")
+        cprint(f"  - in_channels: {in_channels}", "yellow")
+        cprint(f"  - base_width: {base_width}", "yellow")
+        cprint(f"  - stage_depths: {self.stage_depths}", "yellow")
+        cprint(f"  - feature_dim: {feature_dim}", "yellow")
+        cprint(f"  - multi_scale: {self.multi_scale}", "yellow")
+        cprint(f"  - input_patch_size: {self.input_patch_size}", "yellow")
+        cprint(f"  - output_mode: {self.output_mode}", "yellow")
 
     def _space_to_depth(self, x: torch.Tensor) -> torch.Tensor:
         p = self.input_patch_size

@@ -5,6 +5,7 @@ from drifting.utils.vae_utils import VAEManager
 from torch import nn
 import torch.nn.functional as F
 
+from termcolor import cprint
 #######################################################
 #                MAE LightningModule                  #
 #  (Manage train loop for MAE in feature_encoder.py)  #
@@ -63,6 +64,28 @@ class MAEPretrainModule(L.LightningModule):
             self.vae_manager.eval()
             for param in self.vae_manager.parameters():
                 param.requires_grad = False
+    
+        cprint(f"[MAE Training] Initialized with settings:", "green")
+        cprint(f"[Dataset]:", "green")
+        cprint(f"  - name: {self.config['name']}", "green")
+        cprint(f"  - use_latent: {self.config['use_latent']}", "green")
+        cprint(f"  - use_feature_encoder: {self.config['use_feature_encoder']}", "green")
+        cprint(f"  - use_spatial_features: {self.config['use_spatial_features']}", "green")
+        cprint(f"  - img_size: {self.config['img_size']}", "green")
+        cprint(f"[Hyperparameters]:", "green")
+        cprint(f"  - epochs: {self.mae_config['epochs']}", "green")
+        cprint(f"  - lr: {self.mae_config['lr']}", "green")
+        cprint(f"  - multi_scale: {self.mae_config['multi_scale']}", "green")
+        cprint(f"  - weight_decay: {self.mae_config['weight_decay']}", "green")
+        cprint(f"  - finetune_classifier: {self.mae_config['finetune_classifier']}", "green")
+        cprint(f"  - finetune_steps: {self.mae_config['finetune_steps']}", "green")
+        cprint(f"  - finetune_lr: {self.mae_config['finetune_lr']}", "green")
+        cprint(f"  - mae_input_patch: {self.mae_config['mae_input_patch']}", "green")
+        cprint(f"  - mask_block_size: {self.mae_config['mask_block_size']}", "green")
+        cprint(f"  - mask_prob: {self.mae_config['mask_prob']}", "green")
+        cprint(f"  - lambda_max: {self.mae_config['lambda_max']}", "green")
+        cprint(f"  - lambda_warmup_steps: {self.mae_config['lambda_warmup_steps']}", "green")
+        
 
     def forward(self, x):
         return self.encoder.forward_projected(x)

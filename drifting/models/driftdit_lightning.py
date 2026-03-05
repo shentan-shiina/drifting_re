@@ -7,6 +7,8 @@ from drifting.utils.train_utils import sample_batch, sample_unconditional, compu
 
 from drifting.utils.vae_utils import VAEManager
 
+from termcolor import cprint
+
 #######################################################
 #             DriftDiT LightningModule                #
 #  (Manage train loop for DriftDiT in dit_drift.py)   #
@@ -63,6 +65,35 @@ class DriftDiTModule(L.LightningModule):
             for param in self.feature_encoder.parameters():
                 param.requires_grad = False
 
+        cprint(f"[Drift DiT Training] Initialized with settings:", "green")
+        cprint(f"[Dataset]:", "green")
+        cprint(f"  - name: {self.config['name']}", "green")
+        cprint(f"  - use_latent: {self.config['use_latent']}", "green")
+        cprint(f"  - use_feature_encoder: {self.config['use_feature_encoder']}", "green")
+        cprint(f"  - use_spatial_features: {self.config['use_spatial_features']}", "green")
+        cprint(f"  - img_size: {self.config['img_size']}", "green")
+        cprint(f"  - patch_size: {self.config.get('patch_size', 4)}", "green")
+        cprint(f"[Batch]:", "green")
+        cprint(f"  - num_classes: {self.config['num_classes']}", "green")
+        cprint(f"  - samples_per_class: {self.config['samples_per_class']}", "green")
+        cprint(f"  - batch_n_pos: {self.config['batch_n_pos']}", "green")
+        cprint(f"  - batch_n_neg: {self.config['batch_n_neg']}", "green")
+        cprint(f"  - uncond_neg_samples: {self.config['uncond_neg_samples']}", "green")
+        cprint(f"  - uncond_neg_weight: {self.config['uncond_neg_weight']}", "green")
+        cprint(f"[Hyperparameters]:", "green")
+        cprint(f"  - model: {self.config['model']}", "green")
+        cprint(f"  - epochs: {self.config['epochs']}", "green")
+        cprint(f"  - warmup_steps: {self.config['warmup_steps']}", "green")
+        cprint(f"  - lr: {self.config['lr']}", "green")
+        cprint(f"  - temperatures: {self.config['temperatures']}", "green")
+        cprint(f"  - grad_clip: {self.config['grad_clip']}", "green")
+        cprint(f"  - weight_decay: {self.config['weight_decay']}", "green")
+        cprint(f"  - ema_decay: {self.config['ema_decay']}", "green")
+        cprint(f"  - queue_size: {self.config['queue_size']}", "green")
+        cprint(f"  - alpha_min: {self.config['alpha_min']}", "green")
+        cprint(f"  - alpha_max: {self.config['alpha_max']}", "green")
+        cprint(f"  - label_dropout: {self.config['label_dropout']}", "green")
+    
     def forward(self, x, labels, alpha, force_drop_ids=None):
         return self.model(x, labels, alpha, force_drop_ids)
 

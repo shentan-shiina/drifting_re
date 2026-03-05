@@ -16,6 +16,7 @@ from typing import Optional, Tuple
 from einops import rearrange
 from drifting.models.core import RotaryPositionEmbedding
 from drifting.models.dit import DiTBlock, FinalLayer
+from termcolor import cprint
 
 class PatchEmbed(nn.Module):
     """Convert image patches to embeddings using Conv2d."""
@@ -202,6 +203,17 @@ class DriftDiT(nn.Module):
 
         # Initialize weights
         self._init_weights()
+
+        cprint(f"[Drift DiT Module] Initialized with parameters:", "yellow")
+        cprint(f"  - in_channels: {self.in_channels}", "yellow")
+        cprint(f"  - hidden_size: {self.hidden_size}", "yellow")
+        cprint(f"  - depth: {self.depth}", "yellow")
+        cprint(f"  - num_heads: {self.num_heads}", "yellow")
+        cprint(f"  - mlp_ratio: {mlp_ratio}", "yellow")
+        cprint(f"  - num_classes: {num_classes}", "yellow")
+        cprint(f"  - label_dropout: {label_dropout}", "yellow")
+        cprint(f"  - num_register_tokens: {self.num_register_tokens}", "yellow")
+        cprint(f"  - use_style_embed: {self.use_style_embed}", "yellow")
 
     def _init_weights(self):
         """Initialize model weights with specific strategy for adaLN-Zero."""

@@ -14,6 +14,7 @@ patch_size: 4
 num_register_tokens: 16
 
 num_classes: 10
+batch_nc: 10
 samples_per_class: 10
 batch_n_pos: 8
 batch_n_neg: 8
@@ -32,6 +33,8 @@ grad_clip: 2.0
 ema_decay: 0.999
 alpha_min: 1.0
 alpha_max: 3.0
+alpha_prob_one: 0.5
+alpha_power: 3.0
 label_dropout: 0.1
 
 mae:

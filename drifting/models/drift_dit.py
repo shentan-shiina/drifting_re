@@ -114,12 +114,17 @@ class StyleEmbedder(nn.Module):
         self.codebook_size = codebook_size
         self.codebook = nn.Embedding(codebook_size, hidden_size)
 
-    def forward(self, batch_size: int, device: torch.device) -> torch.Tensor:
+    def forward(
+        self,
+        batch_size: int,
+        device: torch.device,
+        indices: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         """Generate random style embeddings."""
-        # Random indices for each sample in the batch
-        indices = torch.randint(
-            0, self.codebook_size, (batch_size, self.num_tokens), device=device
-        )
+        if indices is None:
+            indices = torch.randint(
+                0, self.codebook_size, (batch_size, self.num_tokens), device=device
+            )
         embeddings = self.codebook(indices)  # (B, num_tokens, D)
         # Sum over tokens
         style = embeddings.sum(dim=1)  # (B, D)
@@ -265,6 +270,7 @@ class DriftDiT(nn.Module):
         labels: torch.Tensor,
         alpha: torch.Tensor,
         force_drop_ids: Optional[torch.Tensor] = None,
+        style_indices: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
         Forward pass.
@@ -288,7 +294,7 @@ class DriftDiT(nn.Module):
         c = self.label_embed(labels, self.training, force_drop_ids)
         c = c + self.alpha_embed(alpha)
         if self.use_style_embed:
-            c = c + self.style_embed(B, device)
+            c = c + self.style_embed(B, device, indices=style_indices)
 
         # In-context tokens: projected conditioning + token positional embeddings
         context_tokens = self.in_context_pos_embed.expand(B, -1, -1)
@@ -341,6 +347,16 @@ class DriftDiT(nn.Module):
         labels_combined = torch.cat([labels, labels], dim=0)
         alpha_combined = torch.cat([alpha_tensor, alpha_tensor], dim=0)
 
+        style_indices_combined = None
+        if self.use_style_embed:
+            style_indices = torch.randint(
+                0,
+                self.style_embed.codebook_size,
+                (B, self.style_embed.num_tokens),
+                device=device,
+            )
+            style_indices_combined = torch.cat([style_indices, style_indices], dim=0)
+
         # Force unconditional for second half
         force_drop = torch.cat([
             torch.zeros(B, device=device),
@@ -348,7 +364,13 @@ class DriftDiT(nn.Module):
         ]).bool()
 
         # Forward pass
-        out = self.forward(x_combined, labels_combined, alpha_combined, force_drop)
+        out = self.forward(
+            x_combined,
+            labels_combined,
+            alpha_combined,
+            force_drop,
+            style_indices=style_indices_combined,
+        )
 
         # Split and apply CFG
         cond, uncond = out.chunk(2, dim=0)

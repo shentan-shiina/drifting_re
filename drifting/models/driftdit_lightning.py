@@ -3,7 +3,7 @@ import torch
 from drifting.models.drift_dit import DriftDiT_models
 from drifting.models.feature_encoder import create_feature_encoder
 from drifting.utils.utils import SampleQueue, WarmupLRScheduler
-from drifting.utils.train_utils import sample_batch, sample_unconditional, compute_drifting_loss
+from drifting.utils.train_utils import sample_batch_for_classes, sample_unconditional, compute_drifting_loss
 
 from drifting.utils.vae_utils import VAEManager
 
@@ -97,6 +97,36 @@ class DriftDiTModule(L.LightningModule):
     def forward(self, x, labels, alpha, force_drop_ids=None):
         return self.model(x, labels, alpha, force_drop_ids)
 
+    def _sample_alpha(self, n: int, device: torch.device) -> torch.Tensor:
+        """CFG alpha sampling: 50% at alpha=1, else power-law."""
+        alpha_min = float(self.config["alpha_min"])
+        alpha_max = float(self.config["alpha_max"])
+        alpha_prob_one = float(self.config.get("alpha_prob_one", 0.5))
+        alpha_power = float(self.config.get("alpha_power", 3.0))
+
+        if alpha_max <= alpha_min:
+            return torch.full((n,), alpha_min, device=device)
+
+        alpha = torch.empty(n, device=device)
+        use_one = torch.rand(n, device=device) < alpha_prob_one
+
+        one_value = 1.0 if (alpha_min <= 1.0 <= alpha_max) else alpha_min
+        alpha[use_one] = one_value
+
+        m = int((~use_one).sum().item())
+        if m > 0:
+            u = torch.rand(m, device=device)
+            if abs(alpha_power - 1.0) < 1e-8:
+                vals = alpha_min * (alpha_max / alpha_min) ** u
+            else:
+                p = 1.0 - alpha_power
+                a0 = alpha_min ** p
+                a1 = alpha_max ** p
+                vals = (u * (a1 - a0) + a0) ** (1.0 / p)
+            alpha[~use_one] = vals
+
+        return alpha
+
     def on_train_start(self):
         """Pre-fill the sample queue to avoid wasted early steps."""
         if self.queue.is_ready(self.config["batch_n_pos"]):
@@ -139,17 +169,18 @@ class DriftDiTModule(L.LightningModule):
             return None
 
         num_classes = self.config["num_classes"]
+        batch_nc = min(int(self.config.get("batch_nc", num_classes)), num_classes)
         n_pos = self.config["batch_n_pos"]
         n_neg = self.config["batch_n_neg"]
-        alpha_min = self.config["alpha_min"]
-        alpha_max = self.config["alpha_max"]
         temperatures = self.config["temperatures"]
         use_pixel = not self.config["use_feature_encoder"]
         use_spatial = self.config.get("use_spatial_features", True)
-        batch_size = num_classes * n_neg
+        batch_size = batch_nc * n_neg
 
-        labels = torch.arange(num_classes, device=self.device).repeat_interleave(n_neg)
-        alpha = torch.empty(batch_size, device=self.device).uniform_(alpha_min, alpha_max)
+        class_perm = torch.randperm(num_classes, device=self.device)
+        selected_classes = class_perm[:batch_nc]
+        labels = selected_classes.repeat_interleave(n_neg)
+        alpha = self._sample_alpha(batch_size, self.device)
         noise = torch.randn(
             batch_size,
             self.config["in_channels"],
@@ -159,7 +190,7 @@ class DriftDiTModule(L.LightningModule):
         )
 
         x_gen = self.model(noise, labels, alpha)
-        x_pos, labels_pos = sample_batch(self.queue, num_classes, n_pos, self.device)
+        x_pos, labels_pos = sample_batch_for_classes(self.queue, selected_classes, n_pos, self.device)
 
         x_uncond_neg = None
         if self.config.get("uncond_neg_samples", 0) > 0:

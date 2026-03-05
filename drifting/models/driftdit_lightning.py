@@ -32,7 +32,7 @@ class DriftDiTModule(L.LightningModule):
             in_channels=config["in_channels"],
             num_classes=config["num_classes"],
             label_dropout=config["label_dropout"],
-            num_register_tokens=config.get("num_register_tokens", 8),
+            num_register_tokens=config.get("num_register_tokens", 16),
         )
         
         ########### Queue Init ###########

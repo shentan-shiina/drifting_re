@@ -146,7 +146,7 @@ class DriftDiT(nn.Module):
         mlp_ratio: float = 4.0,
         num_classes: int = 10,
         label_dropout: float = 0.1,
-        num_register_tokens: int = 8,
+        num_register_tokens: int = 16,
         use_style_embed: bool = True,
     ):
         super().__init__()
@@ -167,9 +167,9 @@ class DriftDiT(nn.Module):
             embed_dim=hidden_size,
         )
 
-        # Register (in-context) tokens
+        # In-context token positional embeddings (A.2)
         self.num_register_tokens = num_register_tokens
-        self.register_tokens = nn.Parameter(
+        self.in_context_pos_embed = nn.Parameter(
             torch.randn(1, num_register_tokens, hidden_size) * 0.02
         )
 
@@ -186,6 +186,9 @@ class DriftDiT(nn.Module):
         self.use_style_embed = use_style_embed
         if use_style_embed:
             self.style_embed = StyleEmbedder(hidden_size)
+
+        # Project conditioning vector into in-context token space (A.2)
+        self.cond_to_context = nn.Linear(hidden_size, hidden_size)
 
         # Transformer blocks
         self.blocks = nn.ModuleList([
@@ -281,19 +284,20 @@ class DriftDiT(nn.Module):
         # Patch embedding
         x = self.patch_embed(x)  # (B, N, D)
 
-        # Add register tokens
-        register = self.register_tokens.expand(B, -1, -1)
-        x = torch.cat([register, x], dim=1)  # (B, num_reg + N, D)
-
-        # Get RoPE embeddings
-        seq_len = x.shape[1]
-        rope_cos, rope_sin = self.rope(x, seq_len)
-
         # Conditioning
         c = self.label_embed(labels, self.training, force_drop_ids)
         c = c + self.alpha_embed(alpha)
         if self.use_style_embed:
             c = c + self.style_embed(B, device)
+
+        # In-context tokens: projected conditioning + token positional embeddings
+        context_tokens = self.in_context_pos_embed.expand(B, -1, -1)
+        context_tokens = context_tokens + self.cond_to_context(c).unsqueeze(1)
+        x = torch.cat([context_tokens, x], dim=1)  # (B, num_ctx + N, D)
+
+        # Get RoPE embeddings
+        seq_len = x.shape[1]
+        rope_cos, rope_sin = self.rope(x, seq_len)
 
         # Transformer blocks
         for block in self.blocks:
@@ -350,7 +354,7 @@ class DriftDiT(nn.Module):
         cond, uncond = out.chunk(2, dim=0)
         return uncond + alpha * (cond - uncond)
 
-def DriftDiT_Tiny(img_size=32, patch_size=4, num_register_tokens=8, in_channels=3, num_classes=10, label_dropout=0.1):
+def DriftDiT_Tiny(img_size=32, patch_size=4, num_register_tokens=16, in_channels=3, num_classes=10, label_dropout=0.1):
     """DriftDiT-Tiny: depth=6, hidden_dim=256, heads=4 -> ~5M params"""
     return DriftDiT(
         img_size=img_size,
@@ -365,7 +369,7 @@ def DriftDiT_Tiny(img_size=32, patch_size=4, num_register_tokens=8, in_channels=
         num_register_tokens=num_register_tokens,
     )
 
-def DriftDiT_Small(img_size=32, patch_size=4, num_register_tokens=8, in_channels=3, num_classes=10, label_dropout=0.1):
+def DriftDiT_Small(img_size=32, patch_size=4, num_register_tokens=16, in_channels=3, num_classes=10, label_dropout=0.1):
     """DriftDiT-Small: depth=12, hidden_dim=384, heads=6 -> ~15M params"""
     return DriftDiT(
         img_size=img_size,
@@ -380,7 +384,7 @@ def DriftDiT_Small(img_size=32, patch_size=4, num_register_tokens=8, in_channels
         num_register_tokens=num_register_tokens,
     )
 
-def DriftDiT_Big(img_size=32, patch_size=4, num_register_tokens=8, in_channels=3, num_classes=10, label_dropout=0.1):
+def DriftDiT_Big(img_size=32, patch_size=4, num_register_tokens=16, in_channels=3, num_classes=10, label_dropout=0.1):
     """DriftDiT-Big: depth=12, hidden_dim=768, heads=12 -> ~40M params"""
     return DriftDiT(
         img_size=img_size,

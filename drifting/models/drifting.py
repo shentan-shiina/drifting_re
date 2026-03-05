@@ -15,6 +15,7 @@ def compute_V(
     temperature: float,
     mask_self: bool = True,
     self_mask_count: Optional[int] = None,
+    neg_weights: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
     Compute the drifting field V (Algorithm 2 from paper, Page 12).
@@ -29,6 +30,8 @@ def compute_V(
         mask_self: Whether to mask self-distances (when y_neg contains x)
         self_mask_count: Number of leading negative samples corresponding to x.
             If None, defaults to min(N, N_neg).
+        neg_weights: Optional per-negative weights (shape [N_neg]) used for
+            weighted kernel normalization (e.g., CFG extra negatives in A.7).
 
     Returns:
         V: Drifting field, shape (N, D)
@@ -57,6 +60,10 @@ def compute_V(
     # 3. Compute logits
     logit_pos = -dist_pos / temperature  # (N, N_pos)
     logit_neg = -dist_neg / temperature  # (N, N_neg)
+    if neg_weights is not None:
+        if neg_weights.dim() != 1 or neg_weights.shape[0] != N_neg:
+            raise ValueError(f"neg_weights must be shape ({N_neg},), got {tuple(neg_weights.shape)}")
+        logit_neg = logit_neg + torch.log(neg_weights.to(device=device, dtype=logit_neg.dtype).clamp_min(1e-8)).unsqueeze(0)
 
     # 4. Concat for normalization
     logit = torch.cat([logit_pos, logit_neg], dim=1)  # (N, N_pos + N_neg)
@@ -91,6 +98,7 @@ def compute_V_multi_temperature(
     mask_self: bool = True,
     normalize_each: bool = True,
     self_mask_count: Optional[int] = None,
+    neg_weights: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
     Compute drifting field with multiple temperatures (Sec A.6).
@@ -106,6 +114,7 @@ def compute_V_multi_temperature(
         mask_self: Whether to mask self-distances
         normalize_each: Whether to normalize each V before summing
         self_mask_count: Number of leading negative samples corresponding to x
+        neg_weights: Optional per-negative weights for weighted kernels
 
     Returns:
         V: Combined drifting field, shape (N, D)
@@ -120,6 +129,7 @@ def compute_V_multi_temperature(
             tau,
             mask_self,
             self_mask_count=self_mask_count,
+            neg_weights=neg_weights,
         )
 
         if normalize_each:

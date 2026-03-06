@@ -10,11 +10,11 @@ fid_drop_flip: true
 
 img_size: 32
 in_channels: 3
-patch_size: 4
-num_register_tokens: 16
+patch_size: 2
+num_register_tokens: 8
 
 num_classes: 10
-batch_nc: 10
+batch_nc: 5
 samples_per_class: 10
 batch_n_pos: 12
 batch_n_neg: 12
@@ -39,7 +39,11 @@ label_dropout: 0.1
 
 mae:
   epochs: 20
-  lr: 0.001
+  lr: 0.004
+  batch_size: 8192
+  use_ema: true
+  ema_decay: 0.9995
+  use_rrc_aug: true
   multi_scale: true
   weight_decay: 0.05
   finetune_classifier: false

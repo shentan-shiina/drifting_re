@@ -39,7 +39,11 @@ label_dropout: 0.1
 
 mae:
   epochs: 1000
-  lr: 0.001
+  lr: 0.004
+  batch_size: 8192
+  use_ema: true
+  ema_decay: 0.9995
+  use_rrc_aug: true
   multi_scale: true
   weight_decay: 0.05
   finetune_classifier: true

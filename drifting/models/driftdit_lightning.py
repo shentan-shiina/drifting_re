@@ -58,7 +58,9 @@ class DriftDiTModule(L.LightningModule):
                 input_patch_size=mae_config.get("mae_input_patch", 1),
                 output_mode="multiscale",
                 use_pretrained=not has_mae_ckpt, # Disable default ResNet if using MAE
-                mae_checkpoint_path=config.get("mae_checkpoint_path", None)
+                mae_checkpoint_path=config.get("mae_checkpoint_path", None),
+                ssl_checkpoint_path=config.get("ssl_checkpoint_path", None),
+                allow_supervised_fallback=bool(config.get("allow_supervised_fallback", False)),
             )
             
             self.feature_encoder.eval()

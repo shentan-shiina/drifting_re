@@ -1,5 +1,5 @@
 defaults:
-  - dataset: mnist
+  - dataset: cifar10
   - _self_
 
 seed: 42
@@ -7,9 +7,9 @@ batch_size: 256
 use_latent: ${dataset.use_latent}
 latent_flip: true
 
-num_workers: 8
+num_workers: 4
 log_step_interval: 10
-save_interval: 1
+save_interval: 10
 sample_interval: 1
 
 workspace_root: /home/ubt/1git/drifting_re
@@ -19,13 +19,17 @@ latent_dir: ${data_root}/${dataset.name}/latents
 
 output_dir: /media/ubt/45d39189-c24c-4259-b12e-1d5d5e6071cc/outputs/
 
-run_name: run_1-${dataset.name}-${dataset.model}-L_${dataset.use_latent}-FE_${dataset.use_feature_encoder}-Img_${dataset.img_size}-BPos_${dataset.batch_n_pos}-UC_${dataset.uncond_neg_samples}
+run_name: run_9_p2-${dataset.name}-${dataset.model}-L_${dataset.use_latent}-FE_${dataset.use_feature_encoder}-Img_${dataset.img_size}-BPos_${dataset.batch_n_pos}-UC_${dataset.uncond_neg_samples}
 resume_from_ckpt: true
 resume_dir: ${output_dir}/${dataset.name}/${run_name}/checkpoints
-resume_ckpt: DriftDiT-Tiny-run_1-epoch=1229.ckpt
+resume_ckpt: last.ckpt
 
-mae_checkpoint_dir: ${output_dir}/${dataset.name}/run_5_p2_-cifar10-DriftDiT-Small-L_True-FE_True-SFE_False-Img_128-BPos_8-UC_0/mae_checkpoints/
+mae_checkpoint_dir: ${output_dir}/${dataset.name}/${run_name}/mae_checkpoints/
 resume_mae_ckpt: last.ckpt
+
+# Feature encoder loading policy
+ssl_checkpoint_path: null
+allow_supervised_fallback: false
 
 hydra:
   run:

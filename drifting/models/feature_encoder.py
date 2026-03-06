@@ -23,12 +23,30 @@ class PretrainedResNetEncoder(nn.Module):
 
     def __init__(
         self,
-        pretrained: bool = True,
+        pretrained: bool = False,
+        ssl_checkpoint_path: Optional[str] = None,
+        arch: str = "resnet50",
     ):
         super().__init__()
 
-        # Load pretrained ResNet18
-        resnet = models.resnet18(weights=models.ResNet18_Weights.DEFAULT if pretrained else None)
+        if arch == "resnet50":
+            resnet = models.resnet50(weights=models.ResNet50_Weights.DEFAULT if pretrained else None)
+        elif arch == "resnet18":
+            resnet = models.resnet18(weights=models.ResNet18_Weights.DEFAULT if pretrained else None)
+        else:
+            raise ValueError(f"Unsupported ResNet arch: {arch}")
+
+        if ssl_checkpoint_path is not None:
+            ckpt = torch.load(ssl_checkpoint_path, map_location="cpu", weights_only=False)
+            state_dict = ckpt.get("state_dict", ckpt)
+            cleaned = {}
+            for k, v in state_dict.items():
+                key = k
+                for prefix in ("module.", "backbone.", "encoder.", "model."):
+                    if key.startswith(prefix):
+                        key = key[len(prefix):]
+                cleaned[key] = v
+            resnet.load_state_dict(cleaned, strict=False)
 
         # Extract layers (don't include final fc)
         self.conv1 = resnet.conv1
@@ -393,6 +411,8 @@ def create_feature_encoder(
     output_mode: str = "multiscale",
     use_pretrained: bool = True,
     mae_checkpoint_path: Optional[str] = None, # <-- Added custom checkpoint path
+    ssl_checkpoint_path: Optional[str] = None,
+    allow_supervised_fallback: bool = False,
 ):
     """Create a feature encoder for the specified dataset."""
 
@@ -413,11 +433,18 @@ def create_feature_encoder(
         ckpt = torch.load(mae_checkpoint_path, map_location="cpu", weights_only=False)
         state_dict = ckpt["state_dict"]
         encoder_state = {}
+        ema_state = {}
         for k, v in state_dict.items():
-            if k.startswith("encoder."):
+            if k.startswith("ema_encoder."):
+                ema_state[k.replace("ema_encoder.", "")] = v
+            elif k.startswith("encoder."):
                 encoder_state[k.replace("encoder.", "")] = v
             elif k.startswith("mae.encoder."):
                 encoder_state[k.replace("mae.encoder.", "")] = v
+
+        # Prefer EMA weights when available (paper recipe uses EMA during MAE pretrain)
+        if ema_state:
+            encoder_state.update(ema_state)
                 
         encoder.load_state_dict(encoder_state)
         return encoder
@@ -431,7 +458,16 @@ def create_feature_encoder(
         )
     elif dataset.lower() in ["cifar10", "cifar", "imagenet", "imagenet-tiny", "tiny-imagenet", "tiny_imagenet"]:
         if use_pretrained:
-            return PretrainedResNetEncoder(pretrained=True)
+            if ssl_checkpoint_path is None and not allow_supervised_fallback:
+                raise ValueError(
+                    "Paper-faithful pretrained feature encoders require SSL checkpoints. "
+                    "Set ssl_checkpoint_path or pass allow_supervised_fallback=True."
+                )
+            return PretrainedResNetEncoder(
+                pretrained=allow_supervised_fallback and ssl_checkpoint_path is None,
+                ssl_checkpoint_path=ssl_checkpoint_path,
+                arch="resnet50",
+            )
         else:
             return MultiScaleFeatureEncoder(
                 in_channels=in_channels, base_width=128, blocks_per_stage=blocks_per_stage,

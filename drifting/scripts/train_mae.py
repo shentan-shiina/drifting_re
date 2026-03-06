@@ -14,6 +14,8 @@ from lightning import Trainer, seed_everything
 from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from torch.utils.data import DataLoader
 from torch import set_float32_matmul_precision
+from torchvision import transforms
+from torchvision.transforms import InterpolationMode
 
 from drifting.models.mae_lightning import MAEPretrainModule
 from drifting.utils.data_utils import get_dataset
@@ -53,13 +55,27 @@ def main(cfg: DictConfig):
         # Override channels and size for Latents (SD-VAE = 4 channels, 1/8th size)
         config["in_channels"] = 4
         config["img_size"] = config.get("img_size", 256) // 8
+        if mae_cfg.get("use_rrc_aug", True):
+            print("[MAE] Latent pretraining uses cached latents; random-resized-crop before VAE is unavailable in this mode.")
     else:
         print(f"Loading Pixel Dataset: {config['name']}...")
         train_dataset, _ = get_dataset(config["name"], root=cfg.data_root, resize=config["img_size"])
+        if mae_cfg.get("use_rrc_aug", True):
+            normalize = [0.5] if config["in_channels"] == 1 else [0.5, 0.5, 0.5]
+            train_dataset.transform = transforms.Compose([
+                transforms.RandomResizedCrop(
+                    size=config["img_size"],
+                    scale=(0.2, 1.0),
+                    interpolation=InterpolationMode.BICUBIC,
+                ),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Normalize(normalize, normalize),
+            ])
 
     train_loader = DataLoader(
         train_dataset, 
-        batch_size=cfg.batch_size, 
+        batch_size=int(mae_cfg.get("batch_size", cfg.batch_size)), 
         shuffle=True, 
         num_workers=cfg.num_workers, 
         drop_last=True,

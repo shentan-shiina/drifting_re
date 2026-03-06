@@ -159,6 +159,7 @@ def load_model_from_checkpoint(
 
     model_name = ckpt_cfg.get("model", config["model"])
     img_size = ckpt_cfg.get("img_size", config["img_size"])
+    patch_size = ckpt_cfg.get("patch_size", config["patch_size"])
     in_channels = ckpt_cfg.get("in_channels", config["in_channels"])
     num_classes = ckpt_cfg.get("num_classes", config["num_classes"])
     label_dropout = ckpt_cfg.get("label_dropout", config.get("label_dropout", 0.0))
@@ -167,10 +168,12 @@ def load_model_from_checkpoint(
     model_fn = DriftDiT_models[model_name]
     model = model_fn(
         img_size=img_size,
+        patch_size=patch_size,
         in_channels=in_channels,
         num_classes=num_classes,
         label_dropout=label_dropout,
         num_register_tokens=num_register_tokens,
+
     ).to(device)
 
     # 1. Try to load EMA weights first (injected by our EMACallback)

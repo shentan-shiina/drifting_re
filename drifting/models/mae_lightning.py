@@ -1,5 +1,6 @@
 import lightning as L
 import torch
+import copy
 from drifting.models.feature_encoder import MultiScaleFeatureEncoder, MAEEncoder
 from drifting.utils.vae_utils import VAEManager
 from torch import nn
@@ -19,6 +20,8 @@ class MAEPretrainModule(L.LightningModule):
         self.config = config
         self.mae_config = config.get("mae", {})
         self.training_stage = "pretrain"
+        self.use_ema = bool(self.mae_config.get("use_ema", True))
+        self.ema_decay = float(self.mae_config.get("ema_decay", 0.9995))
 
         in_channels = config.get("in_channels", 3)
         base_width = self.mae_config.get("base_width", 256)
@@ -47,6 +50,11 @@ class MAEPretrainModule(L.LightningModule):
             mask_prob=self.mae_config.get("mask_prob", 0.5),
         )
 
+        if self.use_ema:
+            self.ema_encoder = copy.deepcopy(self.encoder).eval()
+            for p in self.ema_encoder.parameters():
+                p.requires_grad = False
+
         ########### Optional classifier fine-tune (Appendix A.6) ###########
         self.finetune_classifier = self.mae_config.get("finetune_classifier", False)
         if self.finetune_classifier:
@@ -74,17 +82,20 @@ class MAEPretrainModule(L.LightningModule):
         cprint(f"  - img_size: {self.config['img_size']}", "green")
         cprint(f"[Hyperparameters]:", "green")
         cprint(f"  - epochs: {self.mae_config['epochs']}", "green")
-        cprint(f"  - lr: {self.mae_config['lr']}", "green")
-        cprint(f"  - multi_scale: {self.mae_config['multi_scale']}", "green")
-        cprint(f"  - weight_decay: {self.mae_config['weight_decay']}", "green")
-        cprint(f"  - finetune_classifier: {self.mae_config['finetune_classifier']}", "green")
-        cprint(f"  - finetune_steps: {self.mae_config['finetune_steps']}", "green")
-        cprint(f"  - finetune_lr: {self.mae_config['finetune_lr']}", "green")
-        cprint(f"  - mae_input_patch: {self.mae_config['mae_input_patch']}", "green")
-        cprint(f"  - mask_block_size: {self.mae_config['mask_block_size']}", "green")
-        cprint(f"  - mask_prob: {self.mae_config['mask_prob']}", "green")
-        cprint(f"  - lambda_max: {self.mae_config['lambda_max']}", "green")
-        cprint(f"  - lambda_warmup_steps: {self.mae_config['lambda_warmup_steps']}", "green")
+        cprint(f"  - lr: {self.mae_config.get('lr', 4e-3)}", "green")
+        cprint(f"  - batch_size: {self.mae_config.get('batch_size', 'from global')}", "green")
+        cprint(f"  - multi_scale: {self.mae_config.get('multi_scale', True)}", "green")
+        cprint(f"  - weight_decay: {self.mae_config.get('weight_decay', 0.05)}", "green")
+        cprint(f"  - use_ema: {self.use_ema}", "green")
+        cprint(f"  - ema_decay: {self.ema_decay}", "green")
+        cprint(f"  - finetune_classifier: {self.mae_config.get('finetune_classifier', False)}", "green")
+        cprint(f"  - finetune_steps: {self.mae_config.get('finetune_steps', 3000)}", "green")
+        cprint(f"  - finetune_lr: {self.mae_config.get('finetune_lr', self.mae_config.get('lr', 4e-3))}", "green")
+        cprint(f"  - mae_input_patch: {self.mae_config.get('mae_input_patch', 1)}", "green")
+        cprint(f"  - mask_block_size: {self.mae_config.get('mask_block_size', 2)}", "green")
+        cprint(f"  - mask_prob: {self.mae_config.get('mask_prob', 0.5)}", "green")
+        cprint(f"  - lambda_max: {self.mae_config.get('lambda_max', 0.1)}", "green")
+        cprint(f"  - lambda_warmup_steps: {self.mae_config.get('lambda_warmup_steps', 1000)}", "green")
         
 
     def forward(self, x):
@@ -124,16 +135,31 @@ class MAEPretrainModule(L.LightningModule):
         self.log("mae_loss", loss, prog_bar=True)
         return loss
 
+    @torch.no_grad()
+    def _update_ema_encoder(self):
+        if not self.use_ema:
+            return
+        for ema_p, p in zip(self.ema_encoder.parameters(), self.encoder.parameters()):
+            ema_p.data.mul_(self.ema_decay).add_(p.data, alpha=1.0 - self.ema_decay)
+
+    def on_train_batch_end(self, outputs, batch, batch_idx):
+        if self.training_stage == "pretrain":
+            self._update_ema_encoder()
+
     def configure_optimizers(self):
         if self.training_stage == "finetune":
-            lr = self.mae_config.get("finetune_lr", self.mae_config.get("lr", 1e-3))
+            lr = self.mae_config.get("finetune_lr", self.mae_config.get("lr", 4e-3))
             t_max = self.mae_config.get("finetune_steps", 3000)
+            params = list(self.mae.parameters())
+            if self.finetune_classifier:
+                params += list(self.cls_head.parameters())
         else:
-            lr = self.mae_config.get("lr", 1e-3)
+            lr = self.mae_config.get("lr", 4e-3)
             t_max = self.mae_config.get("epochs", 50)
+            params = self.mae.parameters()
 
         optimizer = torch.optim.AdamW(
-            self.mae.parameters(), 
+            params,
             lr=lr,
             weight_decay=self.mae_config.get("weight_decay", 0.05)
         )
